@@ -96,7 +96,13 @@ export function prepareRestore(input: {
     syncPath(dirname(target))
   } catch (error) {
     // Remove only the file this restore created: where the path leads now and where it landed.
-    for (const path of new Set([target, landed])) if (ours(path)) rmSync(path, { force: true })
+    try {
+      for (const path of new Set([target, landed])) if (ours(path)) rmSync(path, { force: true })
+    } catch (cleanupError) {
+      // The verification failure is the finding; the failed removal rides along as in create.
+      if (error instanceof Error)
+        Object.defineProperty(error, 'cleanupError', { value: cleanupError })
+    }
     throw error
   }
   return { bundle: bundle.name, target }

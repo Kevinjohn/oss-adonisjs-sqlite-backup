@@ -198,6 +198,13 @@ export async function createBundle(
         cause,
       })
     }
+    // The backup API cannot run from a connection with an open transaction.
+    if (source.inTransaction) {
+      throw new BackupException(
+        'E_BACKUP_SOURCE',
+        'the borrowed database handle has an open transaction; commit or roll it back first'
+      )
+    }
     if (journalMode !== 'wal') {
       const message = `live database uses journal_mode=${journalMode}, not WAL: writers in other processes wait for the whole copy`
       if (requireWal) throw new BackupException('E_BACKUP_SOURCE', message)

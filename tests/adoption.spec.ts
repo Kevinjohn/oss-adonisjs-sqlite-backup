@@ -60,6 +60,14 @@ test.group('host adoption contracts', (group) => {
       assert.doesNotThrow(() => {
         assert.deepEqual(database.prepare('SELECT count(*) AS n FROM items').get(), { n: 200 })
       })
+      // Inside a write transaction the backup API cannot run: refused as a source error, the
+      // handle and its transaction untouched.
+      database.exec('BEGIN IMMEDIATE')
+      const inTransaction = await createBundle({ source: { database }, directory }).catch((e) => e)
+      assert.equal(inTransaction.code, 'E_BACKUP_SOURCE')
+      assert.match(inTransaction.message, /open transaction/)
+      assert.isTrue(database.inTransaction)
+      database.exec('COMMIT')
       internalHooks.step = (step) => {
         if (step === 'create:copied') throw new Error('injected copy failure')
       }

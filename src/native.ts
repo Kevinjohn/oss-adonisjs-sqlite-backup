@@ -14,6 +14,7 @@ export interface NativeDatabase {
   pragma(sql: string, options?: { simple?: boolean }): unknown
   backup(path: string, options?: { progress?: (info: unknown) => number }): Promise<unknown>
   close(): void
+  readonly inTransaction: boolean
 }
 
 /** Open a native SQLite handle. */

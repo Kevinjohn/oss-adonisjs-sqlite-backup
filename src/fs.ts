@@ -13,11 +13,27 @@ export function syncPath(path: string): void {
   }
 }
 
+/**
+ * Write every byte of `data`, however many calls that takes. A single write may stop short
+ * (disk full, signal) without throwing; publishing after one would leave a truncated file.
+ */
+export function writeAll(
+  fd: number,
+  data: Buffer,
+  write: (fd: number, data: Buffer, offset: number) => number = writeSync
+): void {
+  for (let offset = 0; offset < data.length;) {
+    const written = write(fd, data, offset)
+    if (written <= 0) throw new Error(`write stopped after ${offset} of ${data.length} bytes`)
+    offset += written
+  }
+}
+
 /** Create `path` exclusively with read-only mode, write `data`, fsync. */
 export function writeDurable(path: string, data: string): void {
   const fd = openSync(path, 'wx', 0o400)
   try {
-    writeSync(fd, data)
+    writeAll(fd, Buffer.from(data))
     fsyncSync(fd)
     internalHooks.durability?.('write', path)
   } finally {

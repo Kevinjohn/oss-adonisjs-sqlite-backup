@@ -3,6 +3,7 @@ import { prepared } from './helpers.js'
 import { test } from '@japa/runner'
 import { join, relative } from 'node:path'
 import { createBundle } from '../src/bundles.js'
+import { writeAll } from '../src/fs.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
@@ -58,5 +59,16 @@ test.group('durability', (group) => {
     events = []
     pruneBundles({ directory: join(root, 'b'), keep: 1 })
     assert.deepEqual(events, ['sync b/BUNDLE', 'sync b/BUNDLE', 'sync b'])
+  })
+
+  test('writeAll keeps writing after a short write and fails on no progress', ({ assert }) => {
+    const data = Buffer.from('0123456789')
+    const chunks: string[] = []
+    writeAll(7, data, (_fd, buffer, offset) => {
+      chunks.push(buffer.subarray(offset, offset + 3).toString())
+      return Math.min(3, buffer.length - offset)
+    })
+    assert.deepEqual(chunks, ['012', '345', '678', '9'])
+    assert.throws(() => writeAll(7, data, () => 0), /write stopped after 0 of 10 bytes/)
   })
 })

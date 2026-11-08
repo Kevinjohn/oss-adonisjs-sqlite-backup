@@ -3,6 +3,7 @@ import { test } from '@japa/runner'
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -12,6 +13,7 @@ import {
 import { join } from 'node:path'
 import { createBundle, verifyBundle } from '../src/bundles.js'
 import { acquireLock } from '../src/lock.js'
+import { internalHooks } from '../src/internal_hooks.js'
 import { prepareRestore } from '../src/restore.js'
 import { countItems, makeLiveDatabase, overwrite, tempRoot } from './helpers.js'
 
@@ -153,6 +155,36 @@ test.group('verify and prepareRestore', (group) => {
       'E_BACKUP_INVALID'
     )
     assert.isFalse(existsSync(target))
+  })
+
+  test('prepareRestore reports the verification failure even when cleanup fails', async ({
+    assert,
+  }) => {
+    const db = join(path, 'db.sqlite')
+    chmodSync(db, 0o600)
+    overwrite(db, 4096 * 2, 'garbage')
+    const stage = join(root, 'stage')
+    mkdirSync(stage)
+    const target = join(stage, 'staged.db')
+    // Once the copy has landed, the staging folder stops accepting deletions.
+    internalHooks.step = (step) => {
+      if (step === 'restore:copied') chmodSync(stage, 0o500)
+    }
+    try {
+      const error = (() => {
+        try {
+          prepareRestore({ directory, target, livePath: live })
+          return undefined
+        } catch (caught) {
+          return caught as Error & { code?: string; cleanupError?: NodeJS.ErrnoException }
+        }
+      })()
+      assert.equal(error?.code, 'E_BACKUP_INVALID')
+      assert.equal(error?.cleanupError?.code, 'EACCES')
+    } finally {
+      delete internalHooks.step
+      chmodSync(stage, 0o700)
+    }
   })
 
   test('prepareRestore is lock-free and reports a vanished bundle as not found', async ({
