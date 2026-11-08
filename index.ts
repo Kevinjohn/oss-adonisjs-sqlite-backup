@@ -1,0 +1,17 @@
+export * as errors from './src/errors.js'
+
+export { configure } from './configure.js'
+export { stubsRoot } from './stubs/main.js'
+export { defineConfig } from './src/define_config.js'
+export { SqliteBackup } from './src/sqlite_backup.js'
+export { BackupException, BACKUP_ERROR_CODES } from './src/errors.js'
+export type { BackupErrorCode } from './src/errors.js'
+export { createBundle, listBundles, verifyBundle } from './src/bundles.js'
+export { prepareRestore } from './src/restore.js'
+export { pruneBundles } from './src/prune.js'
+export { acquireLock } from './src/lock.js'
+export type { DirectoryLock } from './src/lock.js'
+export { resolveSqliteSource } from './src/source.js'
+export type * from './src/types.js'
+
+export { prepareDirectory } from './src/directory.js'
