@@ -92,6 +92,9 @@ a later successful prune removes it.
 
 ## Limits
 
+- Keep every folder above the backup root writable only by trusted users, or sticky (like `/tmp`).
+  The root's own permissions are checked, its parents' are not: a user who can rename a parent
+  could swap the root for a symlink between the check and the write.
 - The backup root must not contain the live database. Use a sibling or separate local directory.
   Lucid `file:` URI filenames and in-memory databases are refused; configure a plain filesystem path.
 
