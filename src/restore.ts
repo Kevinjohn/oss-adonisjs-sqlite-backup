@@ -76,7 +76,14 @@ export function prepareRestore(input: {
   internalHooks.step?.('restore:copied', target)
   const ours = (path: string) => {
     const now = lstatSync(path, { throwIfNoEntry: false })
-    return made !== undefined && now?.ino === made.ino && now.dev === made.dev
+    // Inode numbers are reused once a file is deleted, so a replacement file can share one;
+    // its creation time still differs (on filesystems that record it).
+    return (
+      made !== undefined &&
+      now?.ino === made.ino &&
+      now.dev === made.dev &&
+      now.birthtimeMs === made.birthtimeMs
+    )
   }
   try {
     /* c8 ignore next -- `made` is missing only if swapped back within microseconds of the copy */
