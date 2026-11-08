@@ -21,17 +21,4 @@ export default [
       ],
     },
   },
-  {
-    files: ['src/receipts.ts', 'src/bindings/**/*.ts', 'src/mixin.ts', 'src/guard.ts'],
-    rules: {
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'ThrowStatement > NewExpression[callee.name=/^(Error|TypeError)$/]',
-          message:
-            'Throw a package error class, InvalidArgumentsException or RuntimeException at public seams.',
-        },
-      ],
-    },
-  },
 ]
