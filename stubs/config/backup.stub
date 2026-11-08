@@ -1,0 +1,35 @@
+{{{
+  exports({ to: app.configPath('backup.ts') })
+}}}
+import app from '@adonisjs/core/services/app'
+import { defineConfig } from '@kevinjohn/adonisjs-sqlite-backup'
+
+const backupConfig = defineConfig({
+  /**
+   * Lucid connection to back up. Defaults to the primary connection.
+   */
+  // connection: 'sqlite',
+
+  /**
+   * Bundles are written here. It must not contain the live database.
+   * Prefer a different disk from the database.
+   */
+  directory: app.makePath('storage/backups'),
+
+  /**
+   * READY bundles kept by "db:backup prune". "--keep" overrides it.
+   */
+  keep: 7,
+
+  /**
+   * Refuse to back up a database that is not in WAL mode. When false, a warning is printed.
+   */
+  requireWal: false,
+
+  /**
+   * Milliseconds to wait for another backup or prune to finish before failing.
+   */
+  lockTimeoutMs: 0,
+})
+
+export default backupConfig
