@@ -182,6 +182,20 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     create.assertLogMatches(/journal_mode=delete/)
     const verify = await ace.exec('db:backup', ['verify', '--bundle', 'nope'])
     verify.assertFailed()
+    // A flag for another action is refused, never ignored: prune --bundle must not prune by keep.
+    for (const [argv, message] of [
+      [['prune', '--bundle', 'nope'], /--bundle is only supported for verify and restore-prepare/],
+      [
+        ['create', '--target', join(root, 'x.db')],
+        /--target is only supported for restore-prepare/,
+      ],
+      [['verify', '--keep', '1'], /--keep is only supported for prune/],
+    ] as const) {
+      const misused = await ace.exec('db:backup', [...argv])
+      misused.assertFailed()
+      misused.assertLogMatches(message)
+    }
+    assert.isFalse(existsSync(join(root, 'x.db')))
     const backup = await app.container.make('sqlite.backup')
     assert.lengthOf(backup.list(), 1)
     // Config keep (7) applies without --keep; a bundle that cannot be removed fails the command.

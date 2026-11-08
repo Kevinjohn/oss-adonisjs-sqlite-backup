@@ -4,6 +4,17 @@ import { BackupException } from '../src/errors.js'
 
 const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
+/** The actions each flag applies to; a flag given with any other action is refused, not ignored. */
+const FLAG_ACTIONS = {
+  bundle: ['verify', 'restore-prepare'],
+  target: ['restore-prepare'],
+  keep: ['prune'],
+  directory: ['list', 'verify', 'restore-prepare'],
+} as const satisfies Record<string, readonly (typeof ACTIONS)[number][]>
+
+const listOf = (items: readonly string[]) =>
+  items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join('')
+
 /** `node ace db:backup <create|list|verify|restore-prepare|prune>` */
 export default class DbBackup extends BaseCommand {
   static commandName = 'db:backup'
@@ -31,14 +42,14 @@ export default class DbBackup extends BaseCommand {
   async run() {
     try {
       const backup = await this.app.container.make('sqlite.backup')
-      if (
-        this.directory !== undefined &&
-        !['list', 'verify', 'restore-prepare'].includes(this.action)
-      ) {
-        throw new BackupException(
-          'E_BACKUP_UNSAFE',
-          '--directory is only supported for list, verify and restore-prepare'
-        )
+      for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
+        if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
+        if (!(actions as readonly string[]).includes(this.action)) {
+          throw new BackupException(
+            'E_BACKUP_UNSAFE',
+            `--${flag} is only supported for ${listOf(actions)}`
+          )
+        }
       }
       switch (this.action) {
         case 'create': {
