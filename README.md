@@ -36,7 +36,8 @@ the bundle is fixed. `manifest.createdAt` is the real clock time.
 
 `list`, `verify` and `restore-prepare` accept `--directory <path>` to read another backup
 root. This overrides the configured directory and works even when scheduled backups are disabled.
-`create` and `prune` always use the configured directory; they reject `--directory`.
+`create` and `prune` always use the configured directory. A flag given with an action that does
+not read it, such as `prune --bundle`, is refused.
 
 ## Service and configuration
 
