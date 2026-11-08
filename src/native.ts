@@ -1,4 +1,4 @@
-// better-sqlite3 13 publishes no declarations; keep the consumed surface explicit (as the product does).
+// better-sqlite3 13 publishes no declarations; the surface this package consumes is typed here.
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 
