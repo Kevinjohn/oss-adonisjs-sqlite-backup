@@ -37,6 +37,7 @@
     "quick:test": "node --import=@poppinss/ts-exec --enable-source-maps bin/test.ts",
     "pretest": "pnpm lint",
     "test": "c8 pnpm quick:test",
+    "check:changed": "node --import=@poppinss/ts-exec --enable-source-maps bin/check_changed.ts",
     "precompile": "pnpm lint",
     "compile": "tsdown && tsc --emitDeclarationOnly --declaration && node -e \"require('node:fs').cpSync('stubs','build/stubs',{recursive:true,filter:(s)=>!s.endsWith('.ts')})\"",
     "build": "pnpm compile"
