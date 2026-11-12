@@ -1,96 +1,145 @@
-# User story format and maintenance guide
+# Story format
 
-Copy the example into a stable path such as `user-stories/backup/US-BACKUP-01-create-bundle.md`. The `../../` source links are relative to that copied story file. Replace its content with verified behavior and preserve this self-contained guidance when reusing the template.
+A story records one meaningful user action and why it matters. Use actual permission roles,
+actual command/API names and relevant options or form fields. Keep implementation contracts in the repository's
+authoritative decision record, instructions in guides and runnable scenarios in the test suite.
 
-A story records one meaningful action and why it matters. Use real operator roles, Ace command names and API options. Keep product contracts in authoritative repository docs, operational instructions in guides, and runnable scenarios in tests.
+Copy the story example below into `user-stories/backup/US-BACKUP-NN-action.md`; its source links resolve from that copied path. Replace its sample content with source-backed
+details. Keep the writing and maintenance guidance in this TEMPLATE.md, outside individual stories.
+Omit the optional Coverage line when there is no useful test link. The field table is for form
+actions; use the controls/results alternative below for actions without input fields. Adapt both
+diagrams to the actual action rather than retaining the sample save flow.
 
 ## Story example
 
 ````markdown
-# US-BACKUP-01 — Create a verified backup bundle
+# US-OP-01 — Create a verified backup bundle
 
-As a host operator, I want to create a verified SQLite backup bundle so that a crash-safe recovery point is available for the configured database.
+As a host operator, I want to create an immutable backup bundle from the configured Lucid SQLite database so that I have a checked recovery point.
 
-**Status:** Operator; source-reviewed command, not runtime-tested.
-**Access:** Host operator with access to the live database and a private configured backup directory.
-**Entry:** `node ace db:backup create`.
-**Documentation:** [Create command](../../README.md#commands).
-**Source:** [DbBackup.run](../../commands/db_backup.ts), [createBundle](../../src/bundles.ts).
-**Coverage:** [Create tests](../../tests/create.spec.ts).
+**Status:** Operator; current Ace command and service operation.
+**Access:** Host operator with a readable live database and private configured backup root.
+**Entry:** `node ace db:backup create`; run as an operator task, not in a web request.
+**Documentation:** [Command behavior](../../README.md#commands), [service and configuration](../../README.md#service-and-configuration).
+**Source:** [DbBackup.run](../../commands/db_backup.ts), [SqliteBackup.create](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts).
+**Coverage:** [Create tests](../../tests/create.spec.ts), [durability tests](../../tests/durability.spec.ts).
 
 ## Acceptance criteria
 
-- The command prepares the configured directory, then `SqliteBackup.create()` holds the backup lock while copying and validating the database.
-- The bundle is published only after `db.sqlite`, manifest and READY marker are durable; incomplete bundles are removed or remain unpublished if cleanup fails.
-- A WAL warning is shown when required WAL is not configured; a source, lock or integrity failure exits nonzero.
+- `DbBackup.run` prepares the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
+- `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
+- The copy is made using SQLite backup, journal and migration metadata are checked, `checkDatabase()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
+- WAL mode is used. A non-WAL source produces a warning unless `requireWal` makes it a refusal. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
+- `create` uses only configured backup directory; `--directory` is invalid for this action.
 
 ## User flow
 
 ```mermaid
 flowchart TD
     A["Operator runs db:backup create"] --> B["Prepare configured private backup root"]
-    B --> C["Copy live database and verify checks"]
-    C --> D{"Checks succeed?"}
-    D -->|No| E["See failure; incomplete bundle is not a recovery point"]
-    D -->|Yes| F["See published bundle name and path"]
+    B --> C["Open configured live SQLite source and acquire lock"]
+    C --> D["Copy, check integrity and migration journal, write manifest"]
+    D --> E{"All checks pass?"}
+    E -->|No| F["Report failure; unfinished bundle is not published"]
+    E -->|Yes| G["Write READY last and report bundle path"]
 ```
 
 ## Code flow
 
-Scope: Ace action through bundle publication; scheduling remains host-owned.
+Scope: Ace create action through publication and lock release.
 
 ```mermaid
 flowchart TD
     A["DbBackup.run create case"] --> B["SqliteBackup.prepareDirectory"]
     B --> C["SqliteBackup.create"]
-    C --> D["createBundle"]
-    D --> E["acquireLock and source.backup"]
-    E --> F["checkDatabase and writeDurable manifest"]
-    F --> G["writeDurable READY last"]
-    G --> H["Return CreateResult"]
+    C --> D["resolveSqliteSource and createBundle"]
+    D --> E["assertDirectory, assertSafeLayout, acquireLock"]
+    E --> F["NativeDatabase.backup to db.sqlite"]
+    F --> G["migrationRows, checkDatabase, sha256File"]
+    G --> H["writeDurable manifest then READY"]
+    H --> I["Return result; close owned source and release lock"]
 ```
 
-**Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [bundle creation](../../src/bundles.ts), [create tests](../../tests/create.spec.ts).
+**Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts), [durability tests](../../tests/durability.spec.ts).
 ````
 
-## Criteria for actions without input
+## Actions with input fields
 
-For an action without input, use concise observable results instead of an empty field table. For example: `- **List** prints only bundles with a READY marker, oldest first.`
+Use this table for actual command/API options or forms. Record required/default state, limits, options, dependent choices, visibility and read-only conditions; do not invent UI controls for an API.
 
-For command inputs, list each exact flag/argument, type, required/default state, valid values, and which action accepts it. For forms, include exact labels, control types, constraints, options, dependencies, visibility and confirmation controls.
+```markdown
+| Field or input             | Control or API type   | Required/default/conditions                                  |
+| -------------------------- | --------------------- | ------------------------------------------------------------ |
+| [Exact label or parameter] | [Actual control/type] | [Required/optional, default, limits, options and conditions] |
+```
+
+## Actions without input fields
+
+Replace the field table with a short list of controls and their visible results. Do not create
+empty or artificial field rows. For example, a timeline navigation action could use:
+
+```markdown
+## Acceptance criteria
+
+- **List** prints READY bundle names from oldest to newest without modifying them.
+```
+
+Use the actual control and behavior in the product. Include confirmation controls and relevant
+cancellation or failure results when they affect the action. Keep both diagrams in these stories.
 
 ## Writing and maintenance rules
 
-- Give each independently useful outcome its own story. Create, list, verify, prepare restore and prune are distinct actions.
-- Include Status, Access, Entry, Documentation and Source. State when no separate guide exists. Coverage is optional; a test link does not claim that test ran.
-- Keep one action and its meaningful refusal/failure paths together. Describe exact options and observable outputs; do not turn stories into backend test scripts.
-- Keep identifiers and filenames stable. Preserve disappeared historical intent with an explicit availability state unless retirement is authorized.
-- Maintain README, REFERENCE, COVERAGE and GAPS with the stories. “New” means newly documented, not newly implemented.
-- Trace producers and consumers, persistence and interruption cleanup. Distinguish bundle publication from a staged restore copy and from switching a live database.
-- For unavailable stories, label user flow unavailable and show the missing trigger plus retained code support in Code flow.
+- Use one story per meaningful outcome. An inseparable set of controls may share a story;
+  independently useful actions deserve their own. Create and edit are distinct actions.
+- Include every relevant field, including conditional and read-only fields. Record exact labels,
+  required/optional state, defaults, limits, available options and dependent choices. For dynamic
+  choices, describe their source and filtering rules rather than listing transient data.
+- Link an identical shared field list and describe create/edit differences locally. Do not make
+  readers chase several links to discover a form.
+- Keep acceptance criteria concise and observable. Avoid detailed test scripts and exhaustive
+  backend guarantees; keep those in tests and the authoritative decision record.
+- Keep identifiers and filenames stable. Add the next unused identifier within the area. Retain
+  intent and mark availability when a feature disappears, unless retirement is explicitly authorized.
+- Use the availability definitions below. Explain unavailable entries and identify historical or
+  intended controls clearly. Retention does not promise restoration or authorize new functionality.
+- An optional **Coverage:** test link identifies supporting tests; it does not claim they were run.
+  Keep runtime results separate from source-reviewed availability.
+- Verify source rather than inheriting stale copy. Update the index (README.md), coverage matrix
+  (COVERAGE.md), shared reference (REFERENCE.md) and decision gaps (GAPS.md) alongside affected stories.
+  Adapt these names to the repository's established equivalents.
+- Record differences between agreed targets and current implementation in the gaps record without
+  silently changing either. “New” in the coverage matrix means newly documented, not newly implemented.
 
 ## Availability definitions
 
-| Status   | Meaning                                                                      |
-| -------- | ---------------------------------------------------------------------------- |
-| Current  | Exposed under stated role, configuration and conditions                      |
-| Hidden   | Implementation remains but ordinary entry or trigger is unavailable          |
-| Removed  | Historical capability has no current product entry                           |
-| Demo     | Available only in a specified demo context                                   |
-| Operator | Installation, hosting, backup or recovery outside an ordinary application UI |
-| Planned  | Agreed target without an ordinary implemented journey                        |
+| Status   | Meaning                                                                 |
+| -------- | ----------------------------------------------------------------------- |
+| Current  | Exposed, subject to stated roles, configuration and conditions          |
+| Hidden   | Implementation remains but its ordinary entry or trigger is unavailable |
+| Removed  | Historical capability has no current product entry                      |
+| Demo     | Available only in the specified demo context                            |
+| Operator | Installation, hosting or recovery outside the ordinary application UI   |
+| Planned  | Agreed target without an ordinary implemented journey                   |
 
-Read Status with Access and Entry. A configured switch is a condition, not proof of removal. Current describes source availability, not runtime verification.
+Read Status with Access and Entry. A configured feature switch is a condition, not proof of removal.
+Current describes availability, not a browser test result. Preserve equivalent repository status
+semantics and explain their mapping where an established scheme differs.
 
-## Diagram and verification conventions
+## Diagram conventions
 
-- Every story has plain-language User flow and source-backed Code flow Mermaid diagrams. Include meaningful decisions, refusal, failure, cancellation and recovery.
-- Trace actual command/API entry, handler, service/helper, persistence or filesystem effect, and result. Use existing symbols and link them under Code references. Name a boundary when the flow stops early.
-- Distinguish application server writes, local files and read-only operations. State whether the operation changes the live database or only stages data.
-- For Hidden, Removed or Planned, mark the user flow unavailable and show the missing entry/trigger and retained support in Code flow.
-- Parse changed diagrams, inspect representative rendering, and verify source links, IDs, index/matrix parity, status, and decision gaps. Syntax does not prove behavior.
-- Report source review separately from runtime verification.
-
-```
-
-```
+- Every story has User flow and Code flow sections, each containing a Mermaid flowchart. The first
+  uses screens, actions, decisions and outcomes a person understands; the second names the actual
+  implementation. Link supporting files under Code references.
+- Keep diagrams focused on the action. Include meaningful choices, cancellation, refusal, failure
+  and recovery where they affect the journey; avoid repeating every validation or security rule.
+- Trace producers and consumers: entry, handler, state or service, persistence where applicable
+  and resulting UI. A retained component or setter alone does not prove a reachable journey.
+- Distinguish server writes, device preferences and read-only actions. Verify the demo's actual
+  path. Do not infer server authorization from hidden controls.
+- Code labels must name existing symbols or explicitly identify absent/intended controls. State
+  the scope when a diagram stops at a shared boundary.
+- For Hidden, Removed or Planned features, label the intended user flow as unavailable. Show the
+  actual missing entry/trigger and retained support in the code flow without implying execution.
+- Reconcile labels and branches against source. Parse changed Mermaid diagrams and inspect
+  representative rendering; report any check that could not be completed. Syntax validation does
+  not establish behavioral correctness or prove a browser journey was exercised.

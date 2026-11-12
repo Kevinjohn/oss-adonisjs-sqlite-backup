@@ -14,7 +14,7 @@ The package exposes commands and APIs, not a graphical application workflow. `re
 
 ## Availability and evidence
 
-All listed actions are Operator journeys. Availability requires a configured Lucid SQLite file and, for configured operations, a nonempty backup directory. Read overrides for list/verify/restore preparation work while configured actions are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+All listed actions are Operator journeys. Create/source checks require a configured Lucid SQLite file. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 
@@ -28,3 +28,7 @@ All listed actions are Operator journeys. Availability requires a configured Luc
 | Prune                 | [SqliteBackup.prune](../src/sqlite_backup.ts)                                            | [pruneBundles](../src/prune.ts)                                                       |
 
 Standalone exports are in [the package index](../index.ts). The [README](../README.md) is the user-facing contract for limitations, error codes and the fact that restore is preparation only.
+
+## Operator limits
+
+The [README limits](../README.md#limits) require a local filesystem for the SQLite lock and trusted parent directories for backup/restore paths. Linux is tested; Windows is unsupported because directory fsync is required. Copy work is synchronous and belongs in an operator task, not a web request. A plain filesystem SQLite path is required; in-memory and `file:` URI sources are refused. No runtime platform or recovery verification is claimed by this catalogue.

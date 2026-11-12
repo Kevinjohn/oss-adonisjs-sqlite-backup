@@ -11,13 +11,13 @@ As an application operator, I want to configure the Lucid connection, private ba
 
 ## Acceptance criteria
 
-| Config key      | Control                   | Required/default/conditions                                                                  |
-| --------------- | ------------------------- | -------------------------------------------------------------------------------------------- |
-| `directory`     | `config/backup.ts` string | May be omitted/empty to disable configured operations; must be outside the live DB directory |
-| `connection`    | Lucid connection name     | Optional; uses selected connection's source and migration table when available               |
-| `keep`          | Integer                   | Defaults to 7; minimum 1                                                                     |
-| `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; minimum 0                                                                     |
-| `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                      |
+| Config key      | Control                   | Required/default/conditions                                                                                                             |
+| --------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `directory`     | `config/backup.ts` string | May be omitted/empty to disable configured operations; backup root must not contain the live database; a sibling backup folder is valid |
+| `connection`    | Lucid connection name     | Optional; defaults to Lucid's configured connection; uses its source and migration table when available                                 |
+| `keep`          | Integer                   | Defaults to 7; minimum 1                                                                                                                |
+| `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; minimum 0                                                                                                                |
+| `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                                                                 |
 
 - Ace configure writes config stub and registers provider plus `db:backup` command. Provider binds `sqlite.backup` from backup and Lucid config.
 - `defineConfig` validates `keep` and `lockTimeoutMs`; absent directory disables configured service operations, while a read-only `--directory` override remains available to list/verify/restore-prepare.

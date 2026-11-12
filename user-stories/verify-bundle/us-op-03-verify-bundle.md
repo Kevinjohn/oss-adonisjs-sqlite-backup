@@ -17,7 +17,7 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 | `--directory` | String flag | Optional read-only root override; configured directory otherwise |
 
 - `verifyBundle()` selects a real directory, requires READY, parses the format-1 manifest, and checks file size, SHA-256, full SQLite integrity/foreign-key checks, and optional migration metadata.
-- A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. If prune unpublishes the selected bundle during verify, the operation reports not found rather than a false invalid result.
+- A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. Default newest selection reports `E_BACKUP_NOT_FOUND` if prune unpublishes it. A named selection may report `E_BACKUP_INVALID` for a missing READY marker when unpublication occurs before its readiness snapshot.
 - Verification is read-only and lock-free; a concurrent prune may cause the operation to fail.
 
 ## User flow
