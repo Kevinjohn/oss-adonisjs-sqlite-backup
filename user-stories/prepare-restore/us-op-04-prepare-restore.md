@@ -18,7 +18,7 @@ As a host operator, I want to stage and verify a selected bundle at a new path s
 | `--directory` | String flag | Optional read-only backup root override; configured directory otherwise          |
 
 - The action refuses the live database and its `-wal`, `-shm` or `-journal` sidecars, an existing target/sidecar (including dangling symlink), missing folder, or target inside backup root.
-- It copies exclusively to the target, sets mode `0600`, and rechecks size, SHA-256, integrity, foreign keys and migration journal against the bundle manifest. It removes only its own staged file on post-copy failure.
+- It copies exclusively to the target, sets mode `0600`, and rechecks size, SHA-256, integrity, foreign keys and migration journal against the bundle manifest. On post-copy failure it attempts to remove only its own staged file. If removal fails, the original exception carries `cleanupError` and the owned file can remain; inspect and remove that owned staged target before retrying, never an unrelated existing target or the live database.
 - Success stops at a verified copy. It never replaces the live database or changes Lucid configuration. Stopping the app, switching paths, restarting and checking data remain operator decisions; retain the old file until satisfied.
 - Operation is lock-free; a concurrently pruned source may fail verification.
 
@@ -31,7 +31,10 @@ flowchart TD
     B -->|Yes| D["Copy bundle to staged target"]
     D --> E["Verify staged copy against manifest"]
     E --> F{"Copy verifies?"}
-    F -->|No| G["Remove owned partial copy and report failure"]
+    F -->|No| G["Report failure; attempt owned staged-file cleanup"]
+    G --> J{"Cleanup failed?"}
+    J -->|Yes| K["Inspect and remove only owned staged target before retry"]
+    J -->|No| L["Resolve verification failure before retry"]
     F -->|Yes| H["Report staged path; live database is untouched"]
     H --> I["Operator may separately stop app, switch path and validate"]
 ```
@@ -49,7 +52,10 @@ flowchart TD
     E --> F["copyFileSync with COPYFILE_EXCL"]
     F --> G["chmod target 0600 and assertMatchesManifest"]
     G --> H{"Path and verification valid?"}
-    H -->|No| I["Remove only file created by this call and throw"]
+    H -->|No| I["Attempt removal only where ours(path) confirms ownership"]
+    I --> K{"Removal throws?"}
+    K -->|Yes| L["Attach cleanupError to original Error; throw original failure"]
+    K -->|No| M["Throw original failure"]
     H -->|Yes| J["Return bundle and target; never swap live file"]
 ```
 

@@ -29,7 +29,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - `DbBackup.run` prepares the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
 - `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
 - The copy is made using SQLite backup, journal and migration metadata are checked, `checkDatabase()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
-- WAL mode is used. A non-WAL source produces a warning unless `requireWal` makes it a refusal. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
+- The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
 - `create` uses only configured backup directory; `--directory` is invalid for this action.
 
 ## User flow
@@ -38,7 +38,11 @@ As a host operator, I want to create an immutable backup bundle from the configu
 flowchart TD
     A["Operator runs db:backup create"] --> B["Prepare configured private backup root"]
     B --> C["Open configured live SQLite source and acquire lock"]
-    C --> D["Copy, check integrity and migration journal, write manifest"]
+    C --> J{"Existing source mode is WAL?"}
+    J -->|No and requireWal| K["Refuse; operator resolves source configuration"]
+    J -->|No and allowed| L["Report warning; keep source journal mode"]
+    J -->|Yes| D["Copy, normalize copy to DELETE, verify and write manifest"]
+    L --> D
     D --> E{"All checks pass?"}
     E -->|No| F["Report failure; unfinished bundle is not published"]
     E -->|Yes| G["Write READY last and report bundle path"]
@@ -54,8 +58,14 @@ flowchart TD
     B --> C["SqliteBackup.create"]
     C --> D["resolveSqliteSource and createBundle"]
     D --> E["assertDirectory, assertSafeLayout, acquireLock"]
-    E --> F["NativeDatabase.backup to db.sqlite"]
-    F --> G["migrationRows, checkDatabase, sha256File"]
+    E --> J{"Read source journal_mode; non-WAL?"}
+    J -->|Yes and requireWal| K["Throw E_BACKUP_SOURCE"]
+    J -->|Yes and allowed| L["Add warning without changing source"]
+    J -->|No| N["Read source migrationRows"]
+    L --> N
+    N --> F["NativeDatabase.backup to db.sqlite"]
+    F --> M["Checkpoint copy; set copy journal_mode DELETE"]
+    M --> G["Verify copied migrationRows; checkDatabase and sha256File"]
     G --> H["writeDurable manifest then READY"]
     H --> I["Return result; close owned source and release lock"]
 ```
