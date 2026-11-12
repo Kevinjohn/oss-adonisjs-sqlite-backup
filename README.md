@@ -114,3 +114,7 @@ a later successful prune removes it.
   writable only by trusted users.
 - Run `restore-prepare` as a user who can traverse every folder on the live database's path.
   Paths are resolved by walking them; running it as another user who cannot is not supported.
+
+## User story catalogue
+
+See the [source-reviewed user story catalogue](user-stories/README.md) for capability coverage and code-backed action flows.
