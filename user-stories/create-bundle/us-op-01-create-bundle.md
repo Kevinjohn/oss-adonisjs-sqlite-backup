@@ -25,12 +25,12 @@ flowchart TD
     B --> C["Open configured live SQLite source and acquire lock"]
     C --> J{"Existing source mode is WAL?"}
     J -->|No and requireWal| K["Refuse; operator resolves source configuration"]
-    J -->|No and allowed| L["Report warning; keep source journal mode"]
+    J -->|No and allowed| L["Continue without changing source journal mode"]
     J -->|Yes| D["Copy, normalize copy to DELETE, verify and write manifest"]
     L --> D
     D --> E{"All checks pass?"}
     E -->|No| F["Report failure; unfinished bundle is not published"]
-    E -->|Yes| G["Write READY last and report bundle path"]
+    E -->|Yes| G["Write READY last; report queued non-WAL warning if any and bundle path"]
 ```
 
 ## Code flow

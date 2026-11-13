@@ -14,7 +14,7 @@ The package exposes commands and APIs, not a graphical application workflow. `re
 
 ## Availability and evidence
 
-All listed actions are Operator journeys. Create/source checks require a configured Lucid SQLite file. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+All listed actions are Operator journeys. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 
