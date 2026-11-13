@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.2.0 - 2026-11-13
+
+- `db:upgrade` ace command: a verified snapshot of an existing database, then `migration:run`.
+  The snapshot goes to `pre-migration` under the configured backup directory, or to
+  `<database>.backups`; `preMigrationBackupDirectory` returns that path.
+- `operatorDatabasePath` and `withOperatorDatabase` for stopped-server operator commands, with the
+  `NativeDatabase` type.
+- `syncPath` is exported.
+
 ## 0.1.0 - 2026-11-08
 
 First release.

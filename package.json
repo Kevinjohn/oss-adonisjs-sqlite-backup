@@ -1,7 +1,7 @@
 {
   "name": "@kevinjohn/adonisjs-sqlite-backup",
   "description": "Verified SQLite backup bundles and prepare-only restore for AdonisJS 7 Lucid apps",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "engines": {
     "node": ">=24.0.0"
   },
@@ -116,6 +116,7 @@
       "./src/types.ts",
       "./commands/main.ts",
       "./commands/db_backup.ts",
+      "./commands/db_upgrade.ts",
       "./stubs/main.ts",
       "./providers/sqlite_backup_provider.ts"
     ],

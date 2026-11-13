@@ -11,7 +11,7 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release l
 archive's SHA-256.
 
 ```sh
-pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.1.0/kevinjohn-adonisjs-sqlite-backup-0.1.0.tgz
+pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.2.0/kevinjohn-adonisjs-sqlite-backup-0.2.0.tgz
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 
@@ -69,6 +69,55 @@ keep their manifests free of this field.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
 with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
+
+## Upgrading a database
+
+`node ace db:upgrade` takes a verified snapshot of the primary connection's database, then runs
+`migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.
+
+- The snapshot goes to `pre-migration` under the configured backup directory, or to
+  `<database>.backups` beside the database when no backup directory is configured. These bundles
+  are outside `db:backup prune`. `preMigrationBackupDirectory(dbPath, configuredDirectory)` returns
+  the same path.
+- An empty or in-memory database is migrated without a snapshot.
+- If the snapshot cannot be written, nothing is migrated and the command exits 1 with
+  `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
+- The primary connection must use `better-sqlite3`.
+- `--no-schema-generate` is passed on to `migration:run`.
+
+To add a check after migrating, run the command from your own:
+
+```ts
+const upgrade = await this.kernel.exec('db:upgrade', ['--no-schema-generate'])
+if (upgrade.exitCode !== 0) {
+  this.exitCode = upgrade.exitCode ?? 1
+  return
+}
+```
+
+## Stopped-server operator commands
+
+Three exports support commands that must own the database while the server is stopped:
+
+- `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
+  example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
+  pool of one, and the database is an existing file. It returns the file path.
+- `withOperatorDatabase(db, work)` puts the pool's only handle in EXCLUSIVE locking mode, runs
+  `work(connection)`, then closes every connection. Lucid queries inside `work` use that handle. If
+  another process has the file open it throws
+  `Another process holds this database; stop the server and retry`. The pool is closed after every
+  outcome; when a cleanup step also fails, an `AggregateError` carries both failures.
+- `syncPath(path)` fsyncs a file or directory.
+
+```ts
+import db from '@adonisjs/lucid/services/db'
+import { operatorDatabasePath, withOperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
+
+operatorDatabasePath(db, this.confirmServerStopped)
+await withOperatorDatabase(db, async () => {
+  await db.from('heroes').where('name', 'Clark Kent').update({ alias: 'Superman' })
+})
+```
 
 ## Restoring
 
