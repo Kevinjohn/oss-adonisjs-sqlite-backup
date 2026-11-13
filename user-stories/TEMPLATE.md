@@ -26,48 +26,48 @@ As a host operator, I want to create an immutable backup bundle from the configu
 
 ## Acceptance criteria
 
-- `DbBackup.run` prepares the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
-- `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
-- The copy is made using SQLite backup, journal and migration metadata are checked, `checkDatabase()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
-- The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
-- `create` uses only configured backup directory; `--directory` is invalid for this action.
+- A successful create reports the bundle path; when the source is not using WAL, it also warns that other writers wait for the copy. With `requireWal: true`, it refuses instead.
+- On failure, the command reports the error and exits nonzero. If cleanup of a bundle created by this attempt also fails, it reports that failure separately; the operator can run `prune` to remove unfinished bundles.
+- `create` uses the configured backup directory. `--directory` is refused for this action.
+- For source preservation, checked publication, lock scope and cleanup behavior, see [create guarantees and recovery](../REFERENCE.md#create-guarantees-and-recovery).
 
 ## User flow
 
 ```mermaid
 flowchart TD
-    A["Operator runs db:backup create"] --> B["Prepare configured private backup root"]
-    B --> C["Open configured live SQLite source and acquire lock"]
-    C --> J{"Existing source mode is WAL?"}
-    J -->|No and requireWal| K["Refuse; operator resolves source configuration"]
-    J -->|No and allowed| L["Continue without changing source journal mode"]
-    J -->|Yes| D["Copy, normalize copy to DELETE, verify and write manifest"]
-    L --> D
-    D --> E{"All checks pass?"}
-    E -->|No| F["Report failure; unfinished bundle is not published"]
-    E -->|Yes| G["Write READY last; report queued non-WAL warning if any and bundle path"]
+    A["Operator runs db:backup create"] --> B["Prepare configured backup root"]
+    B --> C{"Non-WAL source with requireWal enabled?"}
+    C -->|Yes| D["See refusal; fix source or configuration and retry"]
+    C -->|No| E{"Source uses WAL?"}
+    E -->|No| F["Continue with a non-WAL source"]
+    E -->|Yes| G["Create backup"]
+    F --> G
+    G --> H{"Create succeeds?"}
+    H -->|No| I["See error; resolve cause and retry; run prune if an unfinished bundle remains"]
+    H -->|Yes| J["See bundle path and any non-WAL writer-wait warning"]
 ```
 
 ## Code flow
 
-Scope: Ace create action through publication and lock release.
+Scope: Ace create case through the `createBundle()` result and its post-acquisition `finally`. Path checks and `acquireLock()` failures happen before the lock-owning `try/finally` and do not release an unacquired lock.
 
 ```mermaid
 flowchart TD
-    A["DbBackup.run create case"] --> B["SqliteBackup.prepareDirectory"]
-    B --> C["SqliteBackup.create"]
-    C --> D["resolveSqliteSource and createBundle"]
-    D --> E["assertDirectory, assertSafeLayout, acquireLock"]
-    E --> J{"Read source journal_mode; non-WAL?"}
-    J -->|Yes and requireWal| K["Throw E_BACKUP_SOURCE"]
-    J -->|Yes and allowed| L["Add warning without changing source"]
-    J -->|No| N["Read source migrationRows"]
-    L --> N
-    N --> F["NativeDatabase.backup to db.sqlite"]
-    F --> M["Checkpoint copy; set copy journal_mode DELETE"]
-    M --> G["Verify copied migrationRows; checkDatabase and sha256File"]
-    G --> H["writeDurable manifest then READY"]
-    H --> I["Return result; close owned source and release lock"]
+    A["DbBackup.run create case"] --> B["prepareDirectory; SqliteBackup.create; createBundle preflight"]
+    B --> C{"acquireLock succeeds?"}
+    C -->|No| D["Throw; no acquired lock to release"]
+    C -->|Yes| E["Open source and validate journal mode and transaction state"]
+    E --> F{"Source readable and WAL policy accepted?"}
+    F -->|No| G["Throw E_BACKUP_SOURCE"]
+    F -->|Yes| H["Create owned bundle; copy and check database"]
+    H --> I["Write manifest, then READY last"]
+    I --> J["Return result"]
+    G --> K["Catch: remove unfinished bundle only if this call created it"]
+    H -->|failure| K
+    I -->|failure| K
+    K --> L["Rethrow original; attach cleanupError if cleanup fails"]
+    J --> M["Finally: close owned source; call lock.release()"]
+    L --> M
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts), [durability tests](../../tests/durability.spec.ts).
