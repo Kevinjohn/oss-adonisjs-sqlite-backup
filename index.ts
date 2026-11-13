@@ -15,3 +15,7 @@ export { resolveSqliteSource } from './src/source.js'
 export type * from './src/types.js'
 
 export { prepareDirectory } from './src/directory.js'
+export { syncPath } from './src/fs.js'
+export { operatorDatabasePath, withOperatorDatabase } from './src/operator.js'
+export type { NativeDatabase } from './src/native.js'
+export { preMigrationBackupDirectory } from './src/upgrade.js'
