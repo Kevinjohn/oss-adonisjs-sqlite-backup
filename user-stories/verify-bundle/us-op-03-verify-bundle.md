@@ -17,7 +17,7 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 | `--directory` | String flag | Optional read-only root override; configured directory otherwise |
 
 - `verifyBundle()` selects a real directory, requires READY, parses the format-1 manifest, and checks file size, SHA-256, full SQLite integrity/foreign-key checks, and optional migration metadata.
-- A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. Default newest selection reports `E_BACKUP_NOT_FOUND` if prune unpublishes it. A named selection may report `E_BACKUP_INVALID` for a missing READY marker when unpublication occurs before its readiness snapshot.
+- A `--bundle` value that is not a valid bundle name, or that names something other than a real directory (for example a file or symlink), is refused with `E_BACKUP_UNSAFE` before any check runs. A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. Default newest selection reports `E_BACKUP_NOT_FOUND` if prune unpublishes it. A named selection may report `E_BACKUP_INVALID` for a missing READY marker when unpublication occurs before its readiness snapshot.
 - Verification is read-only and lock-free; a concurrent prune may cause the operation to fail.
 
 ## User flow
@@ -25,7 +25,9 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 ```mermaid
 flowchart TD
     A["Operator runs verify"] --> B{"Name supplied?"}
-    B -->|Yes| C["Select named READY bundle"]
+    B -->|Yes| V{"Valid name for an existing real bundle directory?"}
+    V -->|No| W["See E_BACKUP_UNSAFE or E_BACKUP_NOT_FOUND; correct the name"]
+    V -->|Yes| C["Select named bundle directory"]
     B -->|No| D["Select newest READY bundle"]
     C --> E["Check marker and manifest against database copy"]
     D --> E
@@ -42,7 +44,9 @@ Scope: lock-free bundle selection and verification.
 flowchart TD
     A["DbBackup.run verify case"] --> B["SqliteBackup.verify(name, directory)"]
     B --> C["verifyBundle"]
-    C --> D["selectBundle"]
+    C --> D["selectBundle: parseBundleName, lstat"]
+    D -->|Invalid name or not a directory| X["Throw E_BACKUP_UNSAFE"]
+    D -->|No entry with that name| N["Throw E_BACKUP_NOT_FOUND"]
     D --> E["readManifest"]
     E --> F["assertMatchesManifest"]
     F --> G["Check size, sha256, checkDatabase and assertMigrations"]

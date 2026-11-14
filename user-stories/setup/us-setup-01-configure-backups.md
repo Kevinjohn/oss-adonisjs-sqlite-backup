@@ -19,7 +19,7 @@ As an application operator, I want to configure the Lucid connection, private ba
 | `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; minimum 0                                                                                                                |
 | `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                                                                 |
 
-- Ace configure writes config stub and registers provider plus `db:backup` command. Provider binds `sqlite.backup` from backup and Lucid config.
+- Ace configure writes config stub and registers the provider and the package command loader (`@kevinjohn/adonisjs-sqlite-backup/commands`), which provides `db:backup` and `db:upgrade`. Provider binds `sqlite.backup` from backup and Lucid config.
 - `defineConfig` validates `keep` and `lockTimeoutMs`; absent directory disables configured service operations, while a read-only `--directory` override remains available to list/verify/restore-prepare.
 - At host startup, `checkSource()` can fail fast without making a bundle; call `prepareDirectory()` once to create/tighten the root to `0700` before scheduling create then prune.
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
@@ -42,7 +42,7 @@ Scope: operator setup and backup-root behavior in service and command entry poin
 
 ```mermaid
 flowchart TD
-    A["configure(command) writes config and registers provider/command"] --> B["Provider binds SqliteBackup"]
+    A["configure(command) writes config and registers provider and command loader"] --> B["Provider binds SqliteBackup"]
     B --> C{"Which operation starts?"}
     C -->|Service create or prune| D["Use configured root without preparing it"]
     D --> E{"Does the root already exist?"}
