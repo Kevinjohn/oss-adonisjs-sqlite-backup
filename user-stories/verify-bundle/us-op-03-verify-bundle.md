@@ -25,8 +25,8 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 ```mermaid
 flowchart TD
     A["Operator runs verify"] --> B{"Name supplied?"}
-    B -->|Yes| V{"Valid name for a real bundle directory?"}
-    V -->|No| W["See E_BACKUP_UNSAFE; correct the name"]
+    B -->|Yes| V{"Valid name for an existing real bundle directory?"}
+    V -->|No| W["See E_BACKUP_UNSAFE or E_BACKUP_NOT_FOUND; correct the name"]
     V -->|Yes| C["Select named READY bundle"]
     B -->|No| D["Select newest READY bundle"]
     C --> E["Check marker and manifest against database copy"]
@@ -46,6 +46,7 @@ flowchart TD
     B --> C["verifyBundle"]
     C --> D["selectBundle: parseBundleName, lstat"]
     D -->|Invalid name or not a directory| X["Throw E_BACKUP_UNSAFE"]
+    D -->|No entry with that name| N["Throw E_BACKUP_NOT_FOUND"]
     D --> E["readManifest"]
     E --> F["assertMatchesManifest"]
     F --> G["Check size, sha256, checkDatabase and assertMigrations"]

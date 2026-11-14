@@ -3,7 +3,7 @@
 As a host operator, I want `db:upgrade` to take a verified snapshot of the SQLite database before running pending migrations so that a failed or unwanted migration has a recovery point.
 
 **Status:** Operator; current Ace command.
-**Access:** Host operator with a readable live database, a writable snapshot location and Lucid registered with a `better-sqlite3` primary connection.
+**Access:** Host operator with a readable live database, a writable snapshot location and Lucid registered with a `better-sqlite3` primary connection, and `@adonisjs/lucid/commands` registered because `db:upgrade` runs `migration:run` through the Ace kernel.
 **Entry:** `node ace db:upgrade [--no-schema-generate]`; run as an operator task, not in a web request.
 **Documentation:** [Upgrading a database](../../README.md#upgrading-a-database).
 **Source:** [DbUpgrade.run](../../commands/db_upgrade.ts), [preMigrationBackupDirectory](../../src/upgrade.ts), [createBundle](../../src/bundles.ts), [command loader](../../commands/main.ts).
