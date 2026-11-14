@@ -27,7 +27,7 @@ flowchart TD
     A["Operator runs verify"] --> B{"Name supplied?"}
     B -->|Yes| V{"Valid name for an existing real bundle directory?"}
     V -->|No| W["See E_BACKUP_UNSAFE or E_BACKUP_NOT_FOUND; correct the name"]
-    V -->|Yes| C["Select named READY bundle"]
+    V -->|Yes| C["Select named bundle directory"]
     B -->|No| D["Select newest READY bundle"]
     C --> E["Check marker and manifest against database copy"]
     D --> E
