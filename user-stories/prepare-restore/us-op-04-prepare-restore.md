@@ -3,7 +3,7 @@
 As a host operator, I want to stage and verify a selected bundle at a new path so that I can inspect a recovery copy before deliberately switching the application to it.
 
 **Status:** Operator; current prepare-only restore action.
-**Access:** Operator who can traverse the live database path, read a backup root that is not writable by group or others (owner-only `0700` is recommended and is what `prepareDirectory()` sets), and write to an existing target folder. The target folder's permissions are not checked beyond its existence.
+**Access:** Operator who can traverse the live database path, read a backup root that is not writable by group or others (owner-only `0700` is recommended and is what `prepareDirectory()` sets), and write to an existing target folder. The package checks only that the target folder exists; keep it writable only by trusted users, because a process that can rewrite it can race or replace the staged copy ([Limits](../../README.md#limits)).
 **Entry:** `node ace db:backup restore-prepare --target path [--bundle name] [--directory path]`.
 **Documentation:** [Restoring](../../README.md#restoring).
 **Source:** [DbBackup.run](../../commands/db_backup.ts), [SqliteBackup.prepareRestore](../../src/sqlite_backup.ts), [prepareRestore](../../src/restore.ts).
