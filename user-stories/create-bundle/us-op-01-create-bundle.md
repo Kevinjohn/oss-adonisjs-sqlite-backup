@@ -15,6 +15,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
 - The copy is made using SQLite backup, journal and migration metadata are checked, `checkDatabase()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
 - The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
+- Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
 - `create` uses only configured backup directory; `--directory` is invalid for this action.
 
 ## User flow
@@ -22,12 +23,15 @@ As a host operator, I want to create an immutable backup bundle from the configu
 ```mermaid
 flowchart TD
     A["Operator runs db:backup create"] --> B["Prepare configured private backup root"]
-    B --> C["Open configured live SQLite source and acquire lock"]
+    B --> C["Acquire lock and open configured live SQLite source"]
+    C -->|Lock busy past lockTimeoutMs| X["Refuse E_BACKUP_LOCKED; retry later"]
     C --> J{"Existing source mode is WAL?"}
     J -->|No and requireWal| K["Refuse; operator resolves source configuration"]
     J -->|No and allowed| L["Continue without changing source journal mode"]
-    J -->|Yes| D["Copy, normalize copy to DELETE, verify and write manifest"]
-    L --> D
+    L --> Y{"Newest bundle dated over 24 h ahead of clock?"}
+    J -->|Yes| Y
+    Y -->|Yes| Z["Refuse E_BACKUP_UNSAFE; fix clock or move that bundle"]
+    Y -->|No| D["Copy, normalize copy to DELETE, verify and write manifest"]
     D --> E{"All checks pass?"}
     E -->|No| F["Report failure; unfinished bundle is not published"]
     E -->|Yes| G["Write READY last; report queued non-WAL warning if any and bundle path"]
@@ -35,7 +39,7 @@ flowchart TD
 
 ## Code flow
 
-Scope: Ace create action through publication and lock release.
+Scope: Ace create action through publication, failure cleanup and lock release. `assertDirectory`, `assertSafeLayout` and `acquireLock` failures happen before the lock-owning `try/finally`, so a lock that was never acquired is not released.
 
 ```mermaid
 flowchart TD
@@ -43,16 +47,29 @@ flowchart TD
     B --> C["SqliteBackup.create"]
     C --> D["resolveSqliteSource and createBundle"]
     D --> E["assertDirectory, assertSafeLayout, acquireLock"]
-    E --> J{"Read source journal_mode; non-WAL?"}
-    J -->|Yes and requireWal| K["Throw E_BACKUP_SOURCE"]
-    J -->|Yes and allowed| L["Add warning without changing source"]
-    J -->|No| N["Read source migrationRows"]
-    L --> N
+    E -->|Lock busy past lockTimeoutMs| W["Throw E_BACKUP_LOCKED"]
+    E -->|Lock acquired| O["Open source and read journal_mode"]
+    O --> J{"Non-WAL?"}
+    J -->|"Non-WAL and requireWal"| K["Throw E_BACKUP_SOURCE"]
+    J -->|"Non-WAL and allowed"| L["Add warning without changing source"]
+    J -->|"No, source is WAL"| Q{"Newest bundle over MAX_FUTURE_MS ahead of clock?"}
+    L --> Q
+    Q -->|Yes| R["Throw E_BACKUP_UNSAFE"]
+    Q -->|No| S["mkdir bundle directory; this call now owns it"]
+    S --> N["Read source migrationRows"]
     N --> F["NativeDatabase.backup to db.sqlite"]
     F --> M["Checkpoint copy; set copy journal_mode DELETE"]
     M --> G["Verify copied migrationRows; checkDatabase and sha256File"]
     G --> H["writeDurable manifest then READY"]
-    H --> I["Return result; close owned source and release lock"]
+    H --> I["Return result"]
+    K --> V["Catch: rmSync bundle only if this call created it"]
+    R --> V
+    F -->|failure| V
+    G -->|failure| V
+    H -->|failure| V
+    V --> U["Rethrow original; attach cleanupError if rmSync fails"]
+    I --> T["Finally: close owned source; lock.release()"]
+    U --> T
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts), [durability tests](../../tests/durability.spec.ts).
