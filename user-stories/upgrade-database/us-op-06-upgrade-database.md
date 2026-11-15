@@ -51,7 +51,7 @@ flowchart TD
     D --> E{"dbPath is not :memory: and a table exists?"}
     E -->|No| H["kernel.exec migration:run --force"]
     E -->|Yes| F["preMigrationBackupDirectory; prepareDirectory"]
-    F --> G["createBundle with livePath and directory only"]
+    F --> G["createBundle with livePath, directory, migrations table, lockTimeoutMs and requireWal; log warnings"]
     G -->|failure| X
     G -->|success| H
     H --> I{"migrate.exitCode is 0?"}

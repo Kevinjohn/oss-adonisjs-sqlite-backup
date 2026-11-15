@@ -203,7 +203,7 @@ test.group('db:upgrade', (group) => {
     assert.notInclude(tables(booted.live), 'heroes')
   })
 
-  test('waits for the backup lock for lockTimeoutMs', async ({ assert }) => {
+  test('waits lockTimeoutMs for a held backup lock before refusing', async ({ assert }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
     writeMigration(
       root,
@@ -214,17 +214,22 @@ test.group('db:upgrade', (group) => {
     mkdirSync(directory, { recursive: true, mode: 0o700 })
     const booted = await bootApp(root, {
       backups: join(root, 'backups'),
-      backup: { lockTimeoutMs: 5000 },
+      backup: { lockTimeoutMs: 1000 },
     })
     app = booted.app
-    const holder = await startChild('lock', directory, '300')
+    // The child holds the lock until it is stopped, so the command can only time out. Without the
+    // configured timeout it would refuse at once instead of after the full second.
+    const holder = await startChild('lock', directory)
     try {
+      const started = Date.now()
       const command = await booted.upgrade()
-      command.assertSucceeded()
+      assert.equal(command.exitCode, 1)
+      assert.isAtLeast(Date.now() - started, 1000)
+      assert.include(booted.logs(), 'is locked')
     } finally {
       await stopChild(holder)
     }
-    assert.include(tables(booted.live), 'heroes')
+    assert.notInclude(tables(booted.live), 'heroes')
   }).timeout(20_000)
 
   test('snapshots beside the database when backups are not configured', async ({ assert }) => {
