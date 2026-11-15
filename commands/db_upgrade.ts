@@ -36,7 +36,15 @@ export default class DbUpgrade extends BaseCommand {
         const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
         const directory = preMigrationBackupDirectory(dbPath, config?.directory)
         prepareDirectory(directory)
-        const bundle = await createBundle({ livePath: dbPath, directory })
+        // The same journal table and guards as db:backup, read from the connection being migrated.
+        const bundle = await createBundle({
+          livePath: dbPath,
+          directory,
+          migrationsTable: connectionConfig.migrations?.tableName,
+          lockTimeoutMs: config?.lockTimeoutMs,
+          requireWal: config?.requireWal,
+        })
+        for (const warning of bundle.warnings) this.logger.warning(warning)
         this.logger.success(`Pre-upgrade backup written ${bundle.path}`)
       }
       const migrate = await this.kernel.exec('migration:run', [
