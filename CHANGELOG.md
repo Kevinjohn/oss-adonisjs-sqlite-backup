@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `db:upgrade` snapshots use the primary connection's migrations table and the backup config's
+  `lockTimeoutMs` and `requireWal`, and report the non-WAL warning. Before, they always read
+  `adonis_schema`, never waited for the lock and ignored `requireWal`.
+
 ## 0.2.0 - 2026-11-13
 
 - `db:upgrade` ace command: a verified snapshot of an existing database, then `migration:run`.

@@ -10,11 +10,12 @@ import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { defineConfig as defineDatabaseConfig } from '@adonisjs/lucid'
-import { verifyBundle } from '../src/bundles.js'
+import { readManifest, verifyBundle } from '../src/bundles.js'
 import { defineConfig } from '../src/define_config.js'
+import type { BackupConfigInput } from '../src/types.js'
 import { openDatabase } from '../src/native.js'
 import { preMigrationBackupDirectory } from '../index.js'
-import { tempRoot } from './helpers.js'
+import { startChild, stopChild, tempRoot } from './helpers.js'
 
 // Migration files live in a temporary directory, so they import Lucid by absolute URL.
 const schemaModule = pathToFileURL(createRequire(import.meta.url).resolve('@adonisjs/lucid/schema'))
@@ -28,7 +29,15 @@ function writeMigration(root: string, name: string, body: string) {
   )
 }
 
-async function bootApp(root: string, options: { filename?: string; backups?: string } = {}) {
+async function bootApp(
+  root: string,
+  options: {
+    filename?: string
+    backups?: string
+    backup?: Omit<BackupConfigInput, 'directory'>
+    migrationsTable?: string
+  } = {}
+) {
   const live = options.filename ?? join(root, 'live.db')
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
@@ -43,10 +52,15 @@ async function bootApp(root: string, options: { filename?: string; backups?: str
               connection: { filename: live },
               useNullAsDefault: true,
               pool: { min: 1, max: 1 },
+              ...(options.migrationsTable
+                ? { migrations: { tableName: options.migrationsTable } }
+                : {}),
             },
           },
         }),
-        ...(options.backups ? { backup: defineConfig({ directory: options.backups }) } : {}),
+        ...(options.backups
+          ? { backup: defineConfig({ ...options.backup, directory: options.backups }) }
+          : {}),
       },
       rcFileContents: {
         providers: [
@@ -139,8 +153,79 @@ test.group('db:upgrade', (group) => {
     const directory = join(root, 'backups', 'pre-migration')
     const bundle = verifyBundle(directory)
     assert.include(booted.logs(), `Pre-upgrade backup written ${bundle.path}`)
+    assert.include(booted.logs(), 'live database uses journal_mode=delete, not WAL')
     assert.deepEqual(tables(join(bundle.path, 'db.sqlite')), ['villains'])
   })
+
+  test('records the configured migrations table in the snapshot', async ({ assert }) => {
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const booted = await bootApp(root, {
+      backups: join(root, 'backups'),
+      migrationsTable: 'schema_versions',
+    })
+    app = booted.app
+    // The first run migrates an empty database, so it creates the journal without a snapshot.
+    const first = await booted.upgrade()
+    first.assertSucceeded()
+    writeMigration(root, '002_teams', "this.schema.createTable('teams', (t) => t.increments('id'))")
+    const second = await booted.upgrade()
+    second.assertSucceeded()
+    const bundle = verifyBundle(join(root, 'backups', 'pre-migration'))
+    assert.deepEqual(readManifest(bundle).migrations, {
+      table: 'schema_versions',
+      count: 1,
+      last: 'database/migrations/001_heroes',
+    })
+  })
+
+  test('refuses to snapshot a rollback-journal database when requireWal is set', async ({
+    assert,
+  }) => {
+    openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const booted = await bootApp(root, {
+      backups: join(root, 'backups'),
+      backup: { requireWal: true },
+    })
+    app = booted.app
+    const command = await booted.upgrade()
+    assert.equal(command.exitCode, 1)
+    assert.include(booted.logs(), 'Upgrade failed: ')
+    assert.include(booted.logs(), 'not WAL')
+    assert.notInclude(tables(booted.live), 'heroes')
+  })
+
+  test('waits for the backup lock for lockTimeoutMs', async ({ assert }) => {
+    openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const directory = join(root, 'backups', 'pre-migration')
+    mkdirSync(directory, { recursive: true, mode: 0o700 })
+    const booted = await bootApp(root, {
+      backups: join(root, 'backups'),
+      backup: { lockTimeoutMs: 5000 },
+    })
+    app = booted.app
+    const holder = await startChild('lock', directory, '300')
+    try {
+      const command = await booted.upgrade()
+      command.assertSucceeded()
+    } finally {
+      await stopChild(holder)
+    }
+    assert.include(tables(booted.live), 'heroes')
+  }).timeout(20_000)
 
   test('snapshots beside the database when backups are not configured', async ({ assert }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
