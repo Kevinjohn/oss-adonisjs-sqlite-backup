@@ -177,6 +177,42 @@ test.group('withOperatorDatabase', (group) => {
     })
   })
 
+  test('keeps the same handle after its configured lifetime expires', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, { maxConnectionLifetimeMillis: 50 })
+    await withOperatorDatabase(db, async (handle) => {
+      handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('same')")
+      ;(handle as typeof handle & { __knexLifetimeLimit: number }).__knexLifetimeLimit =
+        Date.now() - 1
+      const rows = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(rows[0].value, 'same')
+      assert.isTrue((handle as typeof handle & { open: boolean }).open)
+    })
+  })
+
+  test('queues a write behind a transaction without joining its rollback', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    const db = lucid(live)
+    await withOperatorDatabase(db, async () => {
+      const trx = await db.transaction()
+      await trx.table('heroes').insert({ name: 'rolled back' })
+      const queued = Promise.resolve(db.table('heroes').insert({ name: 'kept' }))
+      const client = db.connection().getWriteClient().client as unknown as {
+        pool: { numPendingAcquires(): number }
+      }
+      while (client.pool.numPendingAcquires() === 0) await Promise.resolve()
+      await trx.rollback()
+      await queued
+    })
+    const reopened = openDatabase(live)
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'kept' }])
+    reopened.close()
+  })
+
   test('surfaces real Lucid disconnect errors and closes the native handle', async ({ assert }) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
@@ -275,6 +311,52 @@ test.group('withOperatorDatabase', (group) => {
           assert.isTrue(owner.release(handle))
         }),
       /refused the handle release/
+    )
+  })
+
+  test('reports the real pool destroy failure and preserves an earlier work error', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const work = new Error('work failed')
+    const destroy = new Error('native destroy failed')
+    const knex = db.connection().getWriteClient().client as unknown as {
+      destroyRawConnection(handle: unknown): Promise<void>
+    }
+    const original = knex.destroyRawConnection.bind(knex)
+    let handle!: ReturnType<typeof openDatabase>
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        knex.destroyRawConnection = async () => {
+          throw destroy
+        }
+        throw work
+      })
+      assert.fail('Expected work and destroy failures')
+    } catch (error) {
+      assert.instanceOf(error, AggregateError)
+      assert.deepEqual((error as AggregateError).errors, [work, destroy])
+    } finally {
+      knex.destroyRawConnection = original
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('preserves non-contention setup errors', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, {
+      afterCreate: (handle: ReturnType<typeof openDatabase>, done: () => void) => {
+        handle.exec('BEGIN')
+        done()
+      },
+    })
+    await assert.rejects(
+      () => withOperatorDatabase(db, async () => assert.fail('entered')),
+      /transaction/
     )
   })
 })
