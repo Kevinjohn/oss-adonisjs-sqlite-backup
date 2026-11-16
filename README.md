@@ -54,8 +54,10 @@ The directory lock timeout (`lockTimeoutMs`) defaults to 0 and accepts integer m
 0 through 2,147,483,647.
 
 At application startup, call `backup.checkSource()` and `backup.prepareDirectory()` once before
-scheduling `backup.create()` followed by `backup.prune()`. Preparation creates or tightens the root
-to mode `0700`; create and prune never recreate a missing root. A vanished root is
+scheduling `backup.create()` followed by `backup.prune()`. Preparation creates missing directories
+and tightens an existing directory to mode `0700`; an existing non-directory root is refused. The
+manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
+and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
@@ -73,9 +75,10 @@ under Limits. The direct function does not check root privacy. Keep the returned
 referenced until `release()`. The `.backup.lock` file contains no application data. Damaged-lock
 repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
-For package-owned source connections, a native-driver change to SQLite's canonical filename is
-refused. Path resolution follows symlinks to preserve the database's true filesystem identity.
-Borrowed better-sqlite3 handles remain supported and are not closed by the package.
+Filesystem paths are resolved segment by segment, so `..` follows symlink targets. Package-owned
+source connections and restore targets are refused if the native SQLite driver changes the selected
+filename spelling; this does not promise support for every kernel filename form. Borrowed
+better-sqlite3 handles remain supported and are not closed by the package.
 
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
@@ -86,9 +89,9 @@ keep their manifests free of this field.
 
 Verification uses package-opened SQLite connections. Functions, collations or extensions
 registered only on the application's connection are not available to those connections. A schema
-that depends on them, such as an expression index using an application-registered function, may
-fail backup verification; the package then refuses to publish the bundle. The package has no
-initializer hook for registering connection-local SQL features on its verification connections.
+that depends on them may fail verification when the missing feature is exercised; in that case the
+package refuses to publish the bundle. The package has no initializer hook for registering
+connection-local SQL features on its verification connections.
 
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
