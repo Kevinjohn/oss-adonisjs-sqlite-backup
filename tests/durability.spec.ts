@@ -57,6 +57,23 @@ test.group('durability', (group) => {
     assert.equal(events.at(-1), 'sync nested/backups')
   })
 
+  test('two staged preparations accept a directory created after their missing-entry scan', ({
+    assert,
+  }) => {
+    const directory = join(root, 'nested', 'backups')
+    let secondStarted = false
+    internalHooks.durability = (event, path) => {
+      events.push(`${event} ${relative(root, path)}`)
+      if (event === 'sync' && path === root && !secondStarted) {
+        secondStarted = true
+        prepareDirectory(directory)
+      }
+    }
+    prepareDirectory(directory)
+    assert.isTrue(secondStarted)
+    assert.deepEqual(events, ['sync ', 'sync nested', 'sync nested'])
+  })
+
   test('restore-prepare fsyncs the staged file and its directory', async ({ assert }) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
