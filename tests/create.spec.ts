@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { createBundle, listBundles } from '../src/bundles.js'
 import { checkDatabase } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
+import { internalHooks } from '../src/internal_hooks.js'
 import { bundleName } from '../src/names.js'
 import { openDatabase } from '../src/native.js'
 import {
@@ -80,6 +81,38 @@ test.group('createBundle', (group) => {
       readdirSync(directory).filter((n) => n.startsWith('bak-')),
       []
     )
+  })
+
+  test('failed create unpublishes READY before a refused recursive cleanup', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    let readyWritten = false
+    internalHooks.durability = (event, path) => {
+      if (event === 'write' && path.endsWith('/READY')) readyWritten = true
+      if (readyWritten && event === 'sync' && path === directory)
+        throw new Error('post publication failure')
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /post publication failure/)
+      assert.match(
+        String((error as { cleanupError?: unknown }).cleanupError),
+        /recursive cleanup refused/
+      )
+      const bundles = readdirSync(directory).filter((name) => name.startsWith('bak-'))
+      assert.lengthOf(bundles, 1)
+      assert.isFalse(existsSync(join(directory, bundles[0], 'READY')))
+    } finally {
+      delete internalHooks.durability
+      delete internalHooks.step
+    }
   })
 
   test('checkDatabase reports page corruption', async ({ assert }) => {

@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  unlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -297,6 +298,11 @@ export async function createBundle(
   } catch (error) {
     if (bundlePath) {
       try {
+        const marker = join(bundlePath, READY)
+        if (existsSync(marker)) {
+          unlinkSync(marker)
+          syncPath(bundlePath)
+        }
         internalHooks.step?.('create:cleanup', bundlePath)
         rmSync(bundlePath, { recursive: true, force: true })
       } catch (cleanupError) {
