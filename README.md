@@ -44,6 +44,8 @@ not read it, such as `prune --bundle`, is refused.
 `defineConfig({ directory: undefined })` and an empty directory disable configured operations.
 The provider still boots; service operations without a recovery directory fail with
 `E_BACKUP_DISABLED`. Retention defaults to seven READY bundles.
+The directory lock timeout (`lockTimeoutMs`) defaults to 0 and accepts integer milliseconds from
+0 through 2,147,483,647.
 
 At application startup, call `backup.checkSource()` and `backup.prepareDirectory()` once before
 scheduling `backup.create()` followed by `backup.prune()`. Preparation creates or tightens the root
