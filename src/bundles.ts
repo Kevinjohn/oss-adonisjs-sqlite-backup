@@ -21,7 +21,7 @@ import { internalHooks } from './internal_hooks.js'
 import { acquireLock } from './lock.js'
 import { DATABASE, MANIFEST, READY, bundleName, isBundleName, parseBundleName } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
-import { assertSafeLayout, borrowedSourcePath } from './source.js'
+import { assertSafeLayout, borrowedSourcePath, openOwnedSource } from './source.js'
 import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.js'
 
 /** A clock-step allowance: a newest bundle further ahead of the clock than this is refused. */
@@ -217,9 +217,10 @@ export async function createBundle(
   try {
     let journalMode: string
     try {
-      source = borrowed ?? openDatabase(livePath, { fileMustExist: true, readonly: true })
+      source = borrowed ?? openOwnedSource(livePath)
       journalMode = String(source.pragma('journal_mode', { simple: true }))
     } catch (cause) {
+      if (cause instanceof BackupException) throw cause
       throw new BackupException('E_BACKUP_SOURCE', `live database ${livePath} cannot be read`, {
         cause,
       })

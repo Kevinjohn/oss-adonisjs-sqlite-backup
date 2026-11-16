@@ -1,10 +1,10 @@
 import { createBundle, listBundles, verifyBundle } from './bundles.js'
 import { prepareDirectory } from './directory.js'
 import { BackupException } from './errors.js'
-import { openDatabase, type NativeDatabase } from './native.js'
+import type { NativeDatabase } from './native.js'
 import { pruneBundles } from './prune.js'
 import { prepareRestore } from './restore.js'
-import { resolveSqliteSource } from './source.js'
+import { openOwnedSource, resolveSqliteSource } from './source.js'
 import type { BackupConfig, LucidDatabaseConfig } from './types.js'
 
 /** Backup service bound in the container as `sqlite.backup`. */
@@ -30,13 +30,14 @@ export class SqliteBackup {
   checkSource(): void {
     const path = this.livePath()
     try {
-      const source = openDatabase(path, { fileMustExist: true, readonly: true })
+      const source = openOwnedSource(path)
       try {
         source.pragma('schema_version')
       } finally {
         source.close()
       }
     } catch (cause) {
+      if (cause instanceof BackupException) throw cause
       throw new BackupException('E_BACKUP_SOURCE', `live database ${path} cannot be read`, {
         cause,
       })
