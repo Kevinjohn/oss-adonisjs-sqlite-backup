@@ -7,6 +7,10 @@ import { acquireLock } from '../src/lock.js'
 import { startChild, stopChild, tempRoot } from './helpers.js'
 
 test.group('Directory lock', () => {
+  test('rejects unsupported timeout before touching the lock path', ({ assert }) => {
+    assert.throws(() => acquireLock('/missing/lock/root', 2_147_483_648), /2147483647/)
+  })
+
   test('a second holder in the same process is refused until release', async ({ assert }) => {
     const { root, cleanup } = tempRoot()
     try {

@@ -11,6 +11,16 @@ export interface DirectoryLock {
 }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
+export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
+
+export function validateLockTimeout(timeoutMs: number): void {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      `backup lockTimeoutMs must be an integer between 0 and ${MAX_LOCK_TIMEOUT_MS}`
+    )
+  }
+}
 
 function tryLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
@@ -68,6 +78,7 @@ function truncateLockFile(path: string): void {
  * file another process has just locked changes nothing.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
+  validateLockTimeout(timeoutMs)
   const path = join(realPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
