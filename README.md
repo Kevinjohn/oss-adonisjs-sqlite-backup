@@ -11,7 +11,7 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release l
 archive's SHA-256.
 
 ```sh
-pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.2.0/kevinjohn-adonisjs-sqlite-backup-0.2.0.tgz
+pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.3.0/kevinjohn-adonisjs-sqlite-backup-0.3.0.tgz
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 
@@ -73,6 +73,10 @@ under Limits. The direct function does not check root privacy. Keep the returned
 referenced until `release()`. The `.backup.lock` file contains no application data. Damaged-lock
 repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
+For package-owned source connections, a native-driver change to SQLite's canonical filename is
+refused. Path resolution follows symlinks to preserve the database's true filesystem identity.
+Borrowed better-sqlite3 handles remain supported and are not closed by the package.
+
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
@@ -92,10 +96,6 @@ for the newest recorded clock time. Concurrently removed publications are skippe
 with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
 
 ## Upgrading a database
-
-The install command above installs v0.2.0. The upgrade-policy forwarding described below is
-unreleased and is not included in that archive; it will apply only after a release that contains
-the change.
 
 `node ace db:upgrade` takes a verified snapshot of the primary connection's database, then runs
 `migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.

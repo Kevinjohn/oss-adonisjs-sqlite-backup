@@ -6,7 +6,7 @@ As a host operator, I want `db:upgrade` to take a verified snapshot of the SQLit
 **Access:** Host operator with a readable live database, a writable snapshot location and Lucid registered with a `better-sqlite3` primary connection, and `@adonisjs/lucid/commands` registered because `db:upgrade` runs `migration:run` through the Ace kernel.
 **Entry:** `node ace db:upgrade [--no-schema-generate]`; run as an operator task, not in a web request.
 **Documentation:** [Upgrading a database](../../README.md#upgrading-a-database).
-**Release note:** The install command currently targets v0.2.0. Forwarding the configured migrations table, `lockTimeoutMs` and `requireWal` is unreleased and is not included in that archive; it applies only after a release containing the change.
+**Release note:** Since v0.3.0, the snapshot uses the primary connection's migrations table and the backup configuration's `lockTimeoutMs` and `requireWal`, and reports non-WAL warnings.
 **Source:** [DbUpgrade.run](../../commands/db_upgrade.ts), [preMigrationBackupDirectory](../../src/upgrade.ts), [createBundle](../../src/bundles.ts), [command loader](../../commands/main.ts).
 **Coverage:** [Upgrade tests](../../tests/upgrade.spec.ts).
 
