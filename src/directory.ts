@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, statSync } from 'node:fs'
+import { chmodSync, lstatSync, mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { BackupException } from './errors.js'
 import { syncPath } from './fs.js'
@@ -16,7 +16,12 @@ export function prepareDirectory(path: string): void {
     missing.push(current)
   }
   for (const current of missing.reverse()) {
-    mkdirSync(current, { mode: 0o700 })
+    try {
+      mkdirSync(current, { mode: 0o700 })
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      if (!lstatSync(current, { throwIfNoEntry: false })?.isDirectory()) throw error
+    }
     syncPath(dirname(current))
   }
   chmodSync(directory, 0o700)
