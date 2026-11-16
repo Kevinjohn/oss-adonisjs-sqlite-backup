@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const stepLimitMs = 15 * 60 * 1000
 const termGraceMs = 5000
 const reapGraceMs = 5000
+const maxOutputChars = 64 * 1024
 let active: ChildProcess | undefined
 let interruptedBy: NodeJS.Signals | undefined
 let interruptionCleanup: Promise<void> | undefined
@@ -166,21 +167,26 @@ function run(
     let output = ''
     let spawnError: Error | undefined
     let timedOut = false
-    child.stdout.on('data', (chunk) => (output += chunk))
-    child.stderr.on('data', (chunk) => (output += chunk))
+    const appendOutput = (chunk: string) => {
+      output = (output + chunk).slice(-maxOutputChars)
+    }
+    child.stdout.on('data', appendOutput)
+    child.stderr.on('data', appendOutput)
+    let settled = false
+    let timeoutCleanup: Promise<void> | undefined
     const timer = setTimeout(() => {
+      if (settled || active !== child) return
       timedOut = true
-      output += `\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`
-      try {
-        signalOwnedProcess(child, 'SIGKILL')
-      } catch (error) {
-        output += `[check:changed] timeout cleanup failed: ${describeError(error)}\n`
-      }
+      appendOutput(`\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`)
+      timeoutCleanup = terminateOwnedProcess(child)
+      void timeoutCleanup.then(
+        () => abandonActive?.(undefined),
+        (error) => abandonActive?.(error)
+      )
     }, stepLimitMs)
     child.once('error', (error) => {
       spawnError = error
     })
-    let settled = false
     abandonActive = (error) => {
       child.stdout.destroy()
       child.stderr.destroy()
@@ -196,6 +202,13 @@ function run(
       settled = true
       clearTimeout(timer)
       let cleanupError: unknown = terminalError
+      if (timeoutCleanup) {
+        try {
+          await timeoutCleanup
+        } catch (error) {
+          cleanupError = error
+        }
+      }
       if (interruptedBy && interruptionCleanup) {
         try {
           await interruptionCleanup
@@ -205,9 +218,10 @@ function run(
       }
       if (active === child) active = undefined
       abandonActive = undefined
-      if (spawnError) output += `\n[check:changed] spawn failed: ${spawnError.message}\n`
+      if (timedOut) appendOutput(`\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`)
+      if (spawnError) appendOutput(`\n[check:changed] spawn failed: ${spawnError.message}\n`)
       if (cleanupError !== undefined) {
-        output += `\n[check:changed] cleanup failed: ${describeError(cleanupError)}\n`
+        appendOutput(`\n[check:changed] cleanup failed: ${describeError(cleanupError)}\n`)
       }
       resolve({ status: timedOut || signal ? null : status, output, cleanupError })
     }
