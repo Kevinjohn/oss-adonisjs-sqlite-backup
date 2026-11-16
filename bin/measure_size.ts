@@ -7,6 +7,13 @@ import { fork } from 'node:child_process'
 import { mkdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { Worker } from 'node:worker_threads'
+import {
+  hasCleanupFailure,
+  stopWriter,
+  waitForSamplerPeak,
+  withSampler,
+  withWriter,
+} from './measure_size_support.js'
 import { prepareDirectory } from '../src/directory.js'
 import { createBundle, verifyBundle } from '../src/bundles.js'
 import { openDatabase } from '../src/native.js'
@@ -33,8 +40,18 @@ if (role === 'writer') {
     try {
       insert.run('w'.repeat(200))
       writes++
-    } catch {
-      busy++
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === 'SQLITE_BUSY' || code?.startsWith('SQLITE_BUSY_')) busy++
+      else {
+        db.close()
+        process.send!({
+          type: 'error',
+          message: error instanceof Error ? error.message : String(error),
+        })
+        process.exitCode = 1
+        return
+      }
     }
     max = Math.max(max, performance.now() - started)
     setTimeout(tick, 2)
@@ -44,6 +61,7 @@ if (role === 'writer') {
   const root = join(process.cwd(), 'tmp', `size-${process.pid}`)
   const live = join(root, 'live.db')
   const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
+  let removeRoot = true
   const time = async <T>(fn: () => T | Promise<T>) => {
     const started = performance.now()
     const value = await fn()
@@ -52,16 +70,19 @@ if (role === 'writer') {
   mkdirSync(root, { recursive: true })
   try {
     const seed = openDatabase(live)
-    seed.pragma('journal_mode = WAL')
-    seed.exec('CREATE TABLE items (id INTEGER PRIMARY KEY, body TEXT)')
-    const insert = seed.prepare('INSERT INTO items (body) VALUES (?)')
-    for (let batch = 0; batch < 60; batch++) {
-      seed.exec('BEGIN')
-      for (let i = 0; i < 10_000; i++) insert.run(`${batch}-${i}-${'x'.repeat(480)}`)
-      seed.exec('COMMIT')
+    try {
+      seed.pragma('journal_mode = WAL')
+      seed.exec('CREATE TABLE items (id INTEGER PRIMARY KEY, body TEXT)')
+      const insert = seed.prepare('INSERT INTO items (body) VALUES (?)')
+      for (let batch = 0; batch < 60; batch++) {
+        seed.exec('BEGIN')
+        for (let i = 0; i < 10_000; i++) insert.run(`${batch}-${i}-${'x'.repeat(480)}`)
+        seed.exec('COMMIT')
+      }
+      seed.pragma('wal_checkpoint(TRUNCATE)')
+    } finally {
+      seed.close()
     }
-    seed.pragma('wal_checkpoint(TRUNCATE)')
-    seed.close()
     console.log(`database: ${mb(statSync(live).size)} MB, 600000 rows`)
 
     for (const mode of ['wal', 'delete']) {
@@ -71,35 +92,39 @@ if (role === 'writer') {
       const writer = fork(new URL(import.meta.url), ['writer', live], {
         execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
       })
-      await new Promise((resolve) => writer.once('message', resolve))
-      const sampler = new Worker(
-        `const { statSync } = require('node:fs'); const { workerData, parentPort } = require('node:worker_threads');
-         let peak = 0; const t = setInterval(() => { try { peak = Math.max(peak, statSync(workerData).size) } catch {} }, 1);
-         parentPort.on('message', () => { clearInterval(t); parentPort.postMessage(peak) })`,
-        { eval: true, workerData: `${live}-wal` }
-      )
-      const directory = join(root, `bundles-${mode}`)
-      prepareDirectory(directory)
-      const created = await time(() => createBundle({ livePath: live, directory }))
-      sampler.postMessage('stop')
-      const peakWal = await new Promise<number>((resolve) => sampler.once('message', resolve))
-      await sampler.terminate()
-      writer.send('stop')
-      const stats = JSON.parse(
-        String(await new Promise((resolve) => writer.once('message', resolve)))
-      ) as { max: number; writes: number; busy: number }
-      const verified = await time(() => verifyBundle(directory, created.value.name))
-      const restored = await time(() =>
-        prepareRestore({ directory, target: join(root, `staged-${mode}.db`), livePath: live })
-      )
-      console.log(
-        `${mode}: create ${created.ms} ms, verify ${verified.ms} ms, restore-prepare ${restored.ms} ms, ` +
-          `peak WAL ${mb(peakWal)} MB, writer: ${stats.writes} writes, max ${stats.max.toFixed(1)} ms, ${stats.busy} busy errors`
-      )
-      rmSync(directory, { recursive: true, force: true })
-      rmSync(join(root, `staged-${mode}.db`), { force: true })
+      try {
+        await withWriter(writer, async () => {
+          const sampler = new Worker(
+            `const { statSync } = require('node:fs'); const { workerData, parentPort } = require('node:worker_threads');
+           let peak = 0; const t = setInterval(() => { try { peak = Math.max(peak, statSync(workerData).size) } catch {} }, 1);
+           parentPort.on('message', () => { clearInterval(t); parentPort.postMessage(peak) })`,
+            { eval: true, workerData: `${live}-wal` }
+          )
+          await withSampler(sampler, async () => {
+            const directory = join(root, `bundles-${mode}`)
+            prepareDirectory(directory)
+            const created = await time(() => createBundle({ livePath: live, directory }))
+            const peakWal = await waitForSamplerPeak(sampler)
+            const stats = await stopWriter(writer)
+            const verified = await time(() => verifyBundle(directory, created.value.name))
+            const restored = await time(() =>
+              prepareRestore({ directory, target: join(root, `staged-${mode}.db`), livePath: live })
+            )
+            console.log(
+              `${mode}: create ${created.ms} ms, verify ${verified.ms} ms, restore-prepare ${restored.ms} ms, ` +
+                `peak WAL ${mb(peakWal)} MB, writer: ${stats.writes} writes, max ${stats.max.toFixed(1)} ms, ${stats.busy} busy errors`
+            )
+            rmSync(directory, { recursive: true, force: true })
+            rmSync(join(root, `staged-${mode}.db`), { force: true })
+          })
+        })
+      } catch (error) {
+        if (hasCleanupFailure(error)) removeRoot = false
+        throw error
+      }
     }
   } finally {
-    rmSync(root, { recursive: true, force: true })
+    if (removeRoot) rmSync(root, { recursive: true, force: true })
+    else console.error(`kept benchmark directory because a worker may still be active: ${root}`)
   }
 }
