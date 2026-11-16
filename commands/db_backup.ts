@@ -104,6 +104,18 @@ export default class DbBackup extends BaseCommand {
       this.logger.error(`db:backup ${this.action} failed: ${code}${(error as Error).message}`)
       const cleanupError = (error as { cleanupError?: unknown }).cleanupError
       if (cleanupError) this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+      const resourceErrors =
+        (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors ??
+        (error instanceof AggregateError ? error.errors : [])
+      for (const resourceError of resourceErrors) {
+        this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
+        const nestedErrors =
+          resourceError !== null && typeof resourceError === 'object'
+            ? (resourceError as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+            : undefined
+        for (const nestedError of nestedErrors ?? [])
+          this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
+      }
       this.exitCode = 1
     }
   }
