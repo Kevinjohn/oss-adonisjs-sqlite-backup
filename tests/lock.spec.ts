@@ -42,14 +42,14 @@ test.group('Directory lock', () => {
       originalClose.call(this)
     }
     try {
-      let error: (Error & { cleanupError?: Error }) | undefined
+      let error: (Error & { resourceCleanupErrors?: Error[] }) | undefined
       try {
         lock.release()
       } catch (caught) {
-        error = caught as Error & { cleanupError?: Error }
+        error = caught as Error & { resourceCleanupErrors?: Error[] }
       }
       assert.match(String(error), /rollback failed/)
-      assert.match(String(error?.cleanupError), /close failed/)
+      assert.match(String(error?.resourceCleanupErrors?.[0]), /close failed/)
       prototype.exec = originalExec
       failClose = false
       lock.release()
