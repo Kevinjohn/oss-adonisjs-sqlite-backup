@@ -1,4 +1,6 @@
 import { test } from '@japa/runner'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { acquireLock } from '../src/lock.js'
@@ -15,6 +17,159 @@ test.group('Directory lock', () => {
       acquireLock(root).release()
     } finally {
       cleanup()
+    }
+  })
+
+  test('release attempts close after rollback fails and can be retried after close fails', ({
+    assert,
+  }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    let failClose = true
+    const lock = acquireLock(root)
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK')
+        throw new Error('rollback failed')
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock') && failClose) throw new Error('close failed')
+      originalClose.call(this)
+    }
+    try {
+      let error: (Error & { resourceCleanupErrors?: Error[] }) | undefined
+      try {
+        lock.release()
+      } catch (caught) {
+        error = caught as Error & { resourceCleanupErrors?: Error[] }
+      }
+      assert.match(String(error), /rollback failed/)
+      assert.match(String(error?.resourceCleanupErrors?.[0]), /close failed/)
+      prototype.exec = originalExec
+      failClose = false
+      lock.release()
+      acquireLock(root).release()
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        lock.release()
+      } finally {
+        cleanup()
+      }
+    }
+  })
+
+  test('release retains falsy rollback and close failures', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    const lock = acquireLock(root)
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK') throw undefined
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock')) throw 0
+      originalClose.call(this)
+    }
+    try {
+      let failure: unknown
+      try {
+        lock.release()
+        assert.fail('release should throw')
+      } catch (error) {
+        failure = error
+      }
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [undefined, 0])
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        lock.release()
+      } finally {
+        cleanup()
+      }
+    }
+  })
+
+  test('a single falsy rollback failure is still thrown after close succeeds', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+    }
+    const originalExec = prototype.exec
+    const lock = acquireLock(root)
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK') throw undefined
+      return originalExec.call(this, sql)
+    }
+    try {
+      let caught = false
+      try {
+        lock.release()
+      } catch (error) {
+        caught = true
+        assert.isUndefined(error)
+      }
+      assert.isTrue(caught)
+      lock.release()
+      prototype.exec = originalExec
+      acquireLock(root).release()
+    } finally {
+      prototype.exec = originalExec
+      cleanup()
+    }
+  })
+
+  test('failed acquisition retains a non-Error primary and close failure', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    let handle: { name: string } | undefined
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') throw false
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock')) {
+        handle = this
+        throw 0
+      }
+      originalClose.call(this)
+    }
+    try {
+      let failure: unknown
+      try {
+        acquireLock(root)
+        assert.fail('acquisition should throw')
+      } catch (error) {
+        failure = error
+      }
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [false, 0])
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        if (handle) originalClose.call(handle)
+      } finally {
+        cleanup()
+      }
     }
   })
 

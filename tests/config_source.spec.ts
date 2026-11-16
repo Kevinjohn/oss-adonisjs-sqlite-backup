@@ -37,6 +37,8 @@ test.group('config and source resolution', () => {
       },
     }
     assert.equal(resolveSqliteSource(multi, 'other'), '/b.db')
+    assert.equal(resolveSqliteSource(sqlite('  /data/app.db  ')), '/data/app.db')
+    assert.equal(resolveSqliteSource(sqlite('/data/app.db  ', 'sqlite3')), '/data/app.db  ')
   })
 
   test('non-file and non-SQLite connections are refused', ({ assert }) => {
@@ -47,6 +49,9 @@ test.group('config and source resolution', () => {
       sqlite(''),
       sqlite(undefined),
       sqlite('file:/a.db?mode=memory'),
+      sqlite('  :memory:  '),
+      sqlite('   '),
+      sqlite('  file:/a.db?mode=memory  '),
     ]) {
       try {
         resolveSqliteSource(config)

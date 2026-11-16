@@ -1,6 +1,8 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { BackupException } from '../src/errors.js'
+import { realPath } from '../src/paths.js'
+import { assertSafeLayout } from '../src/source.js'
 
 const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
@@ -53,6 +55,7 @@ export default class DbBackup extends BaseCommand {
       }
       switch (this.action) {
         case 'create': {
+          assertSafeLayout(backup.livePath(), realPath(backup.config.directory))
           backup.prepareDirectory()
           const result = await backup.create()
           for (const warning of result.warnings) this.logger.warning(warning)
@@ -98,9 +101,30 @@ export default class DbBackup extends BaseCommand {
       }
     } catch (error) {
       const code = error instanceof BackupException ? `${error.code}: ` : ''
-      this.logger.error(`db:backup ${this.action} failed: ${code}${(error as Error).message}`)
-      const cleanupError = (error as { cleanupError?: unknown }).cleanupError
-      if (cleanupError) this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+      const cleanupError =
+        error !== null && typeof error === 'object'
+          ? (error as { cleanupError?: unknown }).cleanupError
+          : undefined
+      if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
+        this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+      const resourceErrors =
+        (error !== null && typeof error === 'object'
+          ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+          : undefined) ??
+        (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError')
+          ? error.errors
+          : [])
+      for (const resourceError of resourceErrors) {
+        this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
+        const nestedErrors =
+          resourceError !== null && typeof resourceError === 'object'
+            ? (resourceError as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+            : undefined
+        for (const nestedError of nestedErrors ?? [])
+          this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
+      }
       this.exitCode = 1
     }
   }
