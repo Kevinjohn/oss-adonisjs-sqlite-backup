@@ -4,6 +4,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
+import { transpileModule, ModuleKind } from 'typescript'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import { ListLoader } from '@adonisjs/core/ace'
 import Configure from '@adonisjs/core/commands/configure'
@@ -49,6 +50,16 @@ assert(config.includes("from '@kevinjohn/adonisjs-sqlite-backup'"))
 await configureIgnitor.ace().handle(['configure', '@kevinjohn/adonisjs-sqlite-backup'])
 assert.equal(await readFile(join(root, 'adonisrc.ts'), 'utf8'), rc)
 
+for (const source of ['adonisrc.ts', 'config/backup.ts']) {
+  const compiled = transpileModule(await readFile(join(root, source), 'utf8'), {
+    compilerOptions: { module: ModuleKind.ESNext },
+    fileName: source,
+  })
+  await writeFile(join(root, source.replace(/\.ts$/, '.js')), compiled.outputText)
+}
+const generatedRc = (await import(pathToFileURL(join(root, 'adonisrc.js')).href)).default
+const generatedBackup = (await import(pathToFileURL(join(root, 'config/backup.js')).href)).default
+
 const live = join(root, 'live.db')
 const ignitor = new IgnitorFactory()
   .withCoreProviders()
@@ -65,14 +76,11 @@ const ignitor = new IgnitorFactory()
           },
         },
       }),
-      backup: backupPackage.defineConfig({ directory: join(root, 'backups') }),
+      backup: generatedBackup,
     },
     rcFileContents: {
-      providers: [
-        () => import('@adonisjs/lucid/database_provider'),
-        () => import('@kevinjohn/adonisjs-sqlite-backup/sqlite_backup_provider'),
-      ],
-      commands: [() => import('@kevinjohn/adonisjs-sqlite-backup/commands')],
+      providers: [() => import('@adonisjs/lucid/database_provider'), ...generatedRc.providers],
+      commands: generatedRc.commands,
     },
   })
   .create(pathToFileURL(`${root}/`))
