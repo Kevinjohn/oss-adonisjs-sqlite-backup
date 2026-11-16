@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { spawn, type ChildProcess } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from '@japa/runner'
 import { collectExit, isAlive, outputOf, waitForFile } from '../helpers/child_process.js'
 import { fileURLToPath } from 'node:url'
+import { startChild } from '../helpers.js'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const runnerPath = path.join(repoRoot, 'bin/check_changed.ts')
@@ -61,13 +64,13 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
 
   await writeFile(
     path.join(root, 'worker.js'),
-    `import { writeFile } from 'node:fs/promises'\nprocess.on('SIGTERM', () => {})\nawait writeFile(${JSON.stringify(ready)}, String(process.pid))\nsetInterval(() => {}, 1000)\n`
+    `import { writeFile } from 'node:fs/promises'\nprocess.on('SIGTERM', () => {})\nawait writeFile(${JSON.stringify(ready)}, String(process.pid) + '\\n')\nsetInterval(() => {}, 1000)\n`
   )
   if (options.command !== 'missing') {
     const commandPath = path.join(bin, 'pnpm')
     await writeFile(
       commandPath,
-      `#!${process.execPath}\nimport { spawn } from 'node:child_process'\nimport { readFile, writeFile } from 'node:fs/promises'\nconst args = process.argv.slice(2)\nawait writeFile(${JSON.stringify(log)}, (await readFile(${JSON.stringify(log)}, 'utf8')) + args.join(' ') + '\\n')\nif (process.env.CHECK_CHANGED_HANG === '1') {\n  spawn(process.execPath, ['worker.js'], { cwd: process.cwd(), stdio: 'ignore' })\n  for (let attempt = 0; attempt < 250; attempt++) {\n    if (await readFile(${JSON.stringify(ready)}, 'utf8').catch(() => '')) break\n    await new Promise((resolve) => setTimeout(resolve, 20))\n  }\n  setInterval(() => {}, 1000)\n}\n`,
+      `#!${process.execPath}\nimport { spawn } from 'node:child_process'\nimport { readFile, writeFile } from 'node:fs/promises'\nconst args = process.argv.slice(2)\nawait writeFile(${JSON.stringify(log)}, (await readFile(${JSON.stringify(log)}, 'utf8')) + args.join(' ') + '\\n')\nif (process.env.CHECK_CHANGED_HANG === '1') {\n  spawn(process.execPath, ['worker.js'], { cwd: process.cwd(), stdio: 'ignore' })\n  for (let attempt = 0; attempt < 250; attempt++) {\n    if (/^[1-9]\\d*\\n$/.test(await readFile(${JSON.stringify(ready)}, 'utf8').catch(() => ''))) break\n    await new Promise((resolve) => setTimeout(resolve, 20))\n  }\n  setInterval(() => {}, 1000)\n}\n`,
       { mode: 0o755 }
     )
   }
@@ -77,7 +80,7 @@ async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
     const recordTerm = options.hook === 'record-term'
     await writeFile(
       hookPath,
-      `const original = process.kill.bind(process)\nlet killedGroup = null\nprocess.kill = (pid, signal) => {\n  if (pid < 0 && signal === 'SIGTERM') require('node:fs').writeFileSync(${JSON.stringify(termSent)}, 'yes')\n  if (pid < 0 && signal === 'SIGKILL') { killedGroup = pid; return original(pid, signal) }\n  if (${recordTerm ? 'false' : 'true'} && pid === killedGroup && signal === 0) return true\n  return original(pid, signal)\n}\n`
+      `const original = process.kill.bind(process)\nlet killedGroup = null\nprocess.kill = (pid, signal) => {\n  if (pid < 0 && signal === 'SIGTERM') require('node:fs').writeFileSync(${JSON.stringify(termSent)}, String(process.pid) + '\\n')\n  if (pid < 0 && signal === 'SIGKILL') { killedGroup = pid; return original(pid, signal) }\n  if (${recordTerm ? 'false' : 'true'} && pid === killedGroup && signal === 0) return true\n  return original(pid, signal)\n}\n`
     )
   }
 
@@ -132,8 +135,7 @@ test('TERM-resistant descendants receive KILL, are reaped, and block later selec
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const child = launch(f)
   const output = await outputOf(child)
-  await waitForFile(f.ready)
-  const descendantPid = Number(await readFile(f.ready, 'utf8'))
+  const descendantPid = await waitForFile(f.ready)
   child.kill('SIGTERM')
   const result = await collectExit(child, output)
   assert.equal(result.code, 143, result.text)
@@ -150,8 +152,7 @@ test('a second signal escalates immediately while the first signal determines th
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const child = launch(f)
   const output = await outputOf(child)
-  await waitForFile(f.ready)
-  const descendantPid = Number(await readFile(f.ready, 'utf8'))
+  const descendantPid = await waitForFile(f.ready)
   child.kill('SIGTERM')
   await waitForFile(f.termSent)
   child.kill('SIGINT')
@@ -210,3 +211,38 @@ require('node:module').syncBuiltinESMExports()
   assert.match(result.text, /LOCAL_HANDLE_RELEASED/)
   assert.equal(await readFile(f.log, 'utf8'), '')
 }).timeout(10_000)
+
+test('PID readiness ignores empty and numeric-prefix records until framed', async ({ cleanup }) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'sqlite-backup-pid-record-'))
+  cleanup(() => rm(directory, { recursive: true, force: true }))
+  const record = path.join(directory, 'pid')
+  await writeFile(record, '')
+  let settled = false
+  const waiting = waitForFile(record, 1000).then((pid) => {
+    settled = true
+    return pid
+  })
+  await writeFile(record, '123')
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.equal(settled, false)
+  await writeFile(record, '123\n')
+  assert.equal(await waiting, 123)
+})
+
+test('fixture startup rejects when its child exits before ready', async () => {
+  await assert.rejects(startChild('invalid' as 'lock', ''), /exited before ready/)
+}).timeout(10_000)
+
+test('exit collection includes output delivered after exit and before close', async () => {
+  const child = new EventEmitter() as ChildProcess
+  const stdout = new PassThrough()
+  const stderr = new PassThrough()
+  Object.assign(child, { stdout, stderr })
+  const output = await outputOf(child)
+  const finished = collectExit(child, output)
+  child.emit('exit', 0, null)
+  stdout.write('last stdout')
+  stderr.write(' and stderr')
+  child.emit('close', 0, null)
+  assert.deepEqual(await finished, { code: 0, signal: null, text: 'last stdout and stderr' })
+})
