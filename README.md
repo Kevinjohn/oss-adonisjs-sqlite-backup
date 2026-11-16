@@ -58,6 +58,14 @@ Standalone hosts can import `prepareDirectory(path)`, `createBundle`, `listBundl
 exclusive lock. Borrowed handles remain open on success and failure; the package closes only
 handles it opens. The service also accepts `backup.create({ database })`.
 
+Standalone callers can also import `acquireLock(directory, timeoutMs)` to coordinate their own
+work with package backup operations. The caller must provide an existing private directory on a
+local filesystem, with the directory and its ancestors writable only by trusted users, and use its
+canonical path rather than a symlink alias. The direct function does not check root privacy. Keep
+the returned lock object referenced until `release()`. The `.backup.lock` file contains no
+application data; do not create hard-link aliases to it, because repair of a damaged lock can
+truncate the underlying file.
+
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
