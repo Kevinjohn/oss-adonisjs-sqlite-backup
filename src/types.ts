@@ -6,7 +6,7 @@ export interface BackupConfigInput {
   directory?: string
   /** READY bundles kept by `prune` (the `--keep` flag overrides it). Default 7. */
   keep?: number
-  /** Milliseconds to wait for the directory lock before `E_BACKUP_LOCKED`. Default 0. */
+  /** Directory-lock wait before `E_BACKUP_LOCKED`: integer milliseconds 0–2,147,483,647. Default 0. */
   lockTimeoutMs?: number
   /** Refuse non-WAL sources instead of warning. Default false. */
   requireWal?: boolean

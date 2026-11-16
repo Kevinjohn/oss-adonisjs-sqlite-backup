@@ -59,7 +59,6 @@ function truncateLockFile(path: string): void {
     })
   }
   try {
-    /* c8 ignore next 3 -- a device node swapped in by someone able to create one */
     const stat = fstatSync(fd)
     if (!stat.isFile() || stat.nlink !== 1) {
       throw new BackupException(
