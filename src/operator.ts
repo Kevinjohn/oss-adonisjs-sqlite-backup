@@ -56,7 +56,15 @@ type Managed = {
 
 const activeOperators = new WeakSet<Database>()
 
-/** Run against one pinned native handle, then close the managed Lucid connections. */
+/**
+ * Run on the primary connection's pinned native handle, then attempt to close all managed Lucid
+ * connections. The callback must finish its transactions and leave the borrowed handle open.
+ * Concurrent calls on the same Database are refused before cleanup ownership is taken.
+ * Only SQLITE_BUSY during exclusive-lock acquisition receives stopped-server advice; other
+ * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
+ * both fail, AggregateError contains the work failure first and cleanup failures in observation
+ * order.
+ */
 export async function withOperatorDatabase<T>(
   db: Database,
   run: (connection: NativeDatabase) => Promise<T>

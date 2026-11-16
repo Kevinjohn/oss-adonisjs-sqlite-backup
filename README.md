@@ -104,9 +104,11 @@ Three exports support commands that must own the database while the server is st
 - `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
   example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
   pool of one, and the database is an existing file. It returns the file path.
-- `withOperatorDatabase(db, work)` keeps the pool's only handle checked out in EXCLUSIVE locking
-  mode through `work(connection)`, then closes every managed connection. Lucid queries and
-  transactions inside `work` borrow that handle in sequence. Actual lock contention throws
+- `withOperatorDatabase(db, work)` keeps the primary pool's only handle checked out in EXCLUSIVE
+  locking mode through `work(connection)`, then attempts to close every managed connection. Lucid
+  queries and transactions on the primary connection borrow that handle in sequence. An overlapping
+  call on the same `Database` is refused before taking cleanup ownership. Actual `SQLITE_BUSY`
+  contention while taking the lock throws
   `Another process holds this database; stop the server and retry`; an idle open connection alone
   does not imply contention or prove that a server is running. Failed cleanup is reported, including
   lifecycle failures emitted by Lucid and the pool. When work and cleanup both fail, an
