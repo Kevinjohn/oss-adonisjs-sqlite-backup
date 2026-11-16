@@ -68,6 +68,32 @@ test.group('createBundle', (group) => {
     }
   }).timeout(30_000)
 
+  test('a second create waits while the first backup yields in this process', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live, { rows: 20_000 }).close()
+    const directory = join(root, 'b')
+    let resolveCopying!: () => void
+    const copying = new Promise<void>((resolve) => {
+      resolveCopying = resolve
+    })
+    const prior = internalHooks.step
+    internalHooks.step = (step) => {
+      if (step === 'create:copying') resolveCopying()
+    }
+    try {
+      const first = createBundle(prepared({ livePath: live, directory }))
+      await copying
+      const second = createBundle(prepared({ livePath: live, directory, lockTimeoutMs: 5_000 }))
+      const [one, two] = await within(Promise.all([first, second]), 10_000, 'overlapping creates')
+      assert.notEqual(one.name, two.name)
+      assert.equal(listBundles(directory).length, 2)
+    } finally {
+      internalHooks.step = prior
+    }
+  }).timeout(15_000)
+
   test('a failed check publishes nothing', async ({ assert }) => {
     const live = join(root, 'live.db')
     const db = makeLiveDatabase(live)

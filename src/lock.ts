@@ -1,5 +1,7 @@
 import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } from 'node:fs'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import { BackupException } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
 import { realPath } from './paths.js'
@@ -11,6 +13,16 @@ export interface DirectoryLock {
 }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
+export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
+
+export function validateLockTimeout(timeoutMs: number): void {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      `backup lockTimeoutMs must be an integer between 0 and ${MAX_LOCK_TIMEOUT_MS}`
+    )
+  }
+}
 
 function tryLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
@@ -48,8 +60,12 @@ function truncateLockFile(path: string): void {
   }
   try {
     /* c8 ignore next 3 -- a device node swapped in by someone able to create one */
-    if (!fstatSync(fd).isFile()) {
-      throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`)
+    const stat = fstatSync(fd)
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new BackupException(
+        'E_BACKUP_UNSAFE',
+        `lock path ${path} must be a singly linked regular file`
+      )
     }
     ftruncateSync(fd, 0)
   } finally {
@@ -68,6 +84,7 @@ function truncateLockFile(path: string): void {
  * file another process has just locked changes nothing.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
+  validateLockTimeout(timeoutMs)
   const path = join(realPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
@@ -119,5 +136,21 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       if (rollbackFailed) throw rollbackError
       if (closeFailed) throw closeError
     },
+  }
+}
+
+/** Wait for a create lock without blocking the event loop needed by an in-process backup. */
+export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
+  validateLockTimeout(timeoutMs)
+  const deadline = performance.now() + timeoutMs
+  while (true) {
+    try {
+      return acquireLock(directory)
+    } catch (error) {
+      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_LOCKED') throw error
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) throw error
+      await delay(Math.min(remaining, 10))
+    }
   }
 }

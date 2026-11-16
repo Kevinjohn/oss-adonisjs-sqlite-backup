@@ -1,12 +1,29 @@
 import { test } from '@japa/runner'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
-import { statSync, writeFileSync } from 'node:fs'
+import { linkSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { acquireLock } from '../src/lock.js'
+import { acquireCreateLock, acquireLock } from '../src/lock.js'
 import { startChild, stopChild, tempRoot } from './helpers.js'
 
 test.group('Directory lock', () => {
+  test('rejects unsupported timeout before touching the lock path', ({ assert }) => {
+    assert.throws(() => acquireLock('/missing/lock/root', 2_147_483_648), /2147483647/)
+  })
+
+  test('damaged multiply linked lock cannot truncate its alias', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const alias = join(root, 'alias')
+    const lockPath = join(root, '.backup.lock')
+    try {
+      writeFileSync(alias, 'keep these bytes')
+      linkSync(alias, lockPath)
+      assert.throws(() => acquireLock(root), /singly linked regular file/)
+      assert.equal(readFileSync(alias, 'utf8'), 'keep these bytes')
+    } finally {
+      cleanup()
+    }
+  })
   test('a second holder in the same process is refused until release', async ({ assert }) => {
     const { root, cleanup } = tempRoot()
     try {
@@ -198,6 +215,21 @@ test.group('Directory lock', () => {
       const started = Date.now()
       acquireLock(root, 5000).release()
       assert.isAtLeast(Date.now() - started, 100)
+    } finally {
+      await stopChild(holder)
+      cleanup()
+    }
+  }).timeout(20_000)
+
+  test('async create wait yields for another process and bounds refusal', async ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const holder = await startChild('lock', root, '300')
+    try {
+      const started = Date.now()
+      await assert.rejects(() => acquireCreateLock(root, 40), /locked/)
+      assert.isBelow(Date.now() - started, 500)
+      const waited = await acquireCreateLock(root, 5_000)
+      waited.release()
     } finally {
       await stopChild(holder)
       cleanup()
