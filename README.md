@@ -168,4 +168,4 @@ a later successful prune removes it.
 
 ## User story catalogue
 
-See the [source-reviewed user story catalogue](user-stories/README.md) for capability coverage and code-backed action flows.
+See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed action flows.

@@ -40,7 +40,7 @@ const isLintable = (path: string) =>
 
 /** Files that cannot change the built package. Specs also read docs, workflows and examples. */
 function outsidePackage(path: string): boolean {
-  return /^(docs|examples|tests|\.github)\//.test(path) || /^[^/]+\.md$/.test(path)
+  return /^(docs|examples|tests|user-stories|\.github)\//.test(path) || /^[^/]+\.md$/.test(path)
 }
 
 export interface PlanOptions {
