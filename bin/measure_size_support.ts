@@ -1,11 +1,64 @@
 import type { ChildProcess } from 'node:child_process'
 import type { Worker } from 'node:worker_threads'
+import type { NativeDatabase } from '../src/native.js'
 
 export type WriterStats = { max: number; writes: number; busy: number }
 
 const stopGraceMs = 1000
 const killGraceMs = 1000
 const closeSeen = new WeakSet<ChildProcess>()
+type WriterLifecycle = { failure?: Error; stopping: boolean }
+const writerLifecycles = new WeakMap<ChildProcess, WriterLifecycle>()
+
+function lifecycleFor(child: ChildProcess): WriterLifecycle {
+  const existing = writerLifecycles.get(child)
+  if (existing) return existing
+
+  const lifecycle: WriterLifecycle = { stopping: false }
+  const fail = (error: Error) => (lifecycle.failure ??= error)
+  child.on('message', (message: unknown) => {
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      'type' in message &&
+      message.type === 'error'
+    ) {
+      fail(new Error('message' in message ? String(message.message) : 'Writer failed'))
+    }
+  })
+  child.on('error', fail)
+  child.on('exit', (code, signal) => {
+    if (!lifecycle.stopping) {
+      fail(new Error(`Writer exited unexpectedly (code ${code}, signal ${signal ?? 'none'})`))
+    }
+  })
+  writerLifecycles.set(child, lifecycle)
+  return lifecycle
+}
+
+export function withClosedDatabase<T>(db: NativeDatabase, operation: () => T): T {
+  let result: T | undefined
+  let operationFailed = false
+  let operationError: unknown
+  try {
+    result = operation()
+  } catch (error) {
+    operationFailed = true
+    operationError = error
+  }
+
+  try {
+    db.close()
+  } catch (closeError) {
+    if (operationFailed) {
+      throw new AggregateError([operationError, closeError], 'Database operation and close failed')
+    }
+    throw closeError
+  }
+
+  if (operationFailed) throw operationError
+  return result as T
+}
 
 export class ResourceCleanupError extends Error {
   constructor(resource: string, cause: unknown) {
@@ -113,6 +166,7 @@ async function terminateWriter(child: ChildProcess): Promise<void> {
 
 export async function waitForWriterReady(child: ChildProcess, timeoutMs = 10_000): Promise<void> {
   observeClose(child)
+  lifecycleFor(child)
   await onceMessage(
     child,
     (message) => {
@@ -127,6 +181,18 @@ export async function waitForWriterReady(child: ChildProcess, timeoutMs = 10_000
 
 export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promise<WriterStats> {
   observeClose(child)
+  const lifecycle = lifecycleFor(child)
+  if (lifecycle.failure) {
+    try {
+      await terminateWriter(child)
+    } catch (cleanupError) {
+      throw new ResourceCleanupError(
+        'writer',
+        new AggregateError([lifecycle.failure, cleanupError], 'Writer failure and cleanup failed')
+      )
+    }
+    throw lifecycle.failure
+  }
   const response = onceMessage(
     child,
     (message) => {
@@ -134,8 +200,12 @@ export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promi
       const stats = JSON.parse(message) as WriterStats
       if (
         typeof stats.max !== 'number' ||
-        typeof stats.writes !== 'number' ||
-        typeof stats.busy !== 'number'
+        !Number.isFinite(stats.max) ||
+        stats.max < 0 ||
+        !Number.isInteger(stats.writes) ||
+        stats.writes < 0 ||
+        !Number.isInteger(stats.busy) ||
+        stats.busy < 0
       ) {
         throw new Error('Writer returned invalid stats')
       }
@@ -145,6 +215,7 @@ export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promi
     timeoutMs
   )
   try {
+    lifecycle.stopping = true
     child.send('stop')
     const stats = await response
     await closed(child, timeoutMs)
@@ -183,6 +254,7 @@ export async function stopSampler(worker: Worker): Promise<void> {
 }
 
 export async function withWriter<T>(child: ChildProcess, operation: () => Promise<T>): Promise<T> {
+  const lifecycle = lifecycleFor(child)
   let result: T | undefined
   let operationError: unknown
   try {
@@ -191,6 +263,7 @@ export async function withWriter<T>(child: ChildProcess, operation: () => Promis
   } catch (error) {
     operationError = error
   }
+  if (lifecycle.failure && operationError === undefined) operationError = lifecycle.failure
   try {
     await terminateWriter(child)
   } catch (cleanupError) {
@@ -210,22 +283,28 @@ export async function withWriter<T>(child: ChildProcess, operation: () => Promis
 }
 
 export async function withSampler<T>(worker: Worker, operation: () => Promise<T>): Promise<T> {
-  let rejectFailure!: (error: Error) => void
-  const failure = new Promise<never>((_, reject) => (rejectFailure = reject))
-  const onError = (error: Error) => rejectFailure(error)
+  let samplerFailure: Error | undefined
+  const onError = (error: Error) => (samplerFailure ??= error)
   const onExit = (code: number) =>
-    rejectFailure(new Error(`Sampler exited unexpectedly (code ${code})`))
+    (samplerFailure ??= new Error(`Sampler exited unexpectedly (code ${code})`))
   worker.once('error', onError)
   worker.once('exit', onExit)
   let result: T | undefined
   let operationError: unknown
   try {
-    result = await Promise.race([operation(), failure])
+    result = await operation()
   } catch (error) {
     operationError = error
   }
   worker.off('error', onError)
   worker.off('exit', onExit)
+  if (samplerFailure && operationError === undefined) operationError = samplerFailure
+  else if (samplerFailure && operationError !== undefined) {
+    operationError = new AggregateError(
+      [operationError, samplerFailure],
+      'Benchmark operation and sampler failed'
+    )
+  }
   try {
     await stopSampler(worker)
   } catch (cleanupError) {
