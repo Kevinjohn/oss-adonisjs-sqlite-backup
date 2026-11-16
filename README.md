@@ -58,6 +58,14 @@ Standalone hosts can import `prepareDirectory(path)`, `createBundle`, `listBundl
 exclusive lock. Borrowed handles remain open on success and failure; the package closes only
 handles it opens. The service also accepts `backup.create({ database })`.
 
+Standalone callers can also import `acquireLock(directory, timeoutMs)` to coordinate their own
+work with package backup operations. The caller must provide an existing private directory on a
+local filesystem, with the directory and its ancestors writable only by trusted users, and use its
+canonical path rather than a symlink alias. The direct function does not check root privacy. Keep
+the returned lock object referenced until `release()`. The `.backup.lock` file contains no
+application data; do not create hard-link aliases to it, because repair of a damaged lock can
+truncate the underlying file.
+
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
@@ -104,11 +112,14 @@ Three exports support commands that must own the database while the server is st
 - `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
   example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
   pool of one, and the database is an existing file. It returns the file path.
-- `withOperatorDatabase(db, work)` puts the pool's only handle in EXCLUSIVE locking mode, runs
-  `work(connection)`, then closes every connection. Lucid queries inside `work` use that handle. If
-  another process has the file open it throws
-  `Another process holds this database; stop the server and retry`. The pool is closed after every
-  outcome; when a cleanup step also fails, an `AggregateError` carries both failures.
+- `withOperatorDatabase(db, work)` keeps the pool's only handle checked out in EXCLUSIVE locking
+  mode through `work(connection)`, then closes every managed connection. Lucid queries and
+  transactions inside `work` borrow that handle in sequence. Actual lock contention throws
+  `Another process holds this database; stop the server and retry`; an idle open connection alone
+  does not imply contention or prove that a server is running. Failed cleanup is reported, including
+  lifecycle failures emitted by Lucid and the pool. When work and cleanup both fail, an
+  `AggregateError` preserves the failures in order. The callback must finish its transactions and
+  leave the borrowed handle open.
 - `syncPath(path)` fsyncs a file or directory.
 
 ```ts
@@ -168,4 +179,4 @@ a later successful prune removes it.
 
 ## User story catalogue
 
-See the [source-reviewed user story catalogue](user-stories/README.md) for capability coverage and code-backed action flows.
+See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed action flows.

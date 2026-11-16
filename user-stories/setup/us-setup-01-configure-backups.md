@@ -23,6 +23,7 @@ As an application operator, I want to configure the Lucid connection, private ba
 - `defineConfig` validates `keep` and `lockTimeoutMs`; absent directory disables configured service operations, while a read-only `--directory` override remains available to list/verify/restore-prepare.
 - At host startup, `checkSource()` can fail fast without making a bundle; call `prepareDirectory()` once to create/tighten the root to `0700` before scheduling create then prune.
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
+- A caller using exported `acquireLock(directory, timeoutMs)` directly must provide an existing private directory on a local filesystem, with the root and its ancestors controlled by trusted users, and pass its canonical path rather than a symlink alias. `acquireLock` itself does not check root privacy. Keep the returned lock referenced through `release()`. `.backup.lock` contains no application data; do not create hard-link aliases to it, because damaged-lock repair can truncate the underlying file.
 
 ## User flow
 
@@ -53,4 +54,4 @@ flowchart TD
     I --> J["Create bundle in prepared root"]
 ```
 
-**Code references:** [configure hook](../../configure.ts), [provider](../../providers/sqlite_backup_provider.ts), [config validation](../../src/define_config.ts), [service create and prune](../../src/sqlite_backup.ts), [prune root check](../../src/prune.ts), [db:backup create preparation](../../commands/db_backup.ts), [README startup contract](../../README.md#service-and-configuration).
+**Code references:** [configure hook](../../configure.ts), [provider](../../providers/sqlite_backup_provider.ts), [config validation](../../src/define_config.ts), [service create and prune](../../src/sqlite_backup.ts), [prune root check](../../src/prune.ts), [direct lock export](../../index.ts), [lock implementation](../../src/lock.ts), [db:backup create preparation](../../commands/db_backup.ts), [README startup contract](../../README.md#service-and-configuration).
