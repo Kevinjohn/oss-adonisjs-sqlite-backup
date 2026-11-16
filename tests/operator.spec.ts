@@ -4,9 +4,11 @@ import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
 import { EventEmitter } from 'node:events'
 import { performance } from 'node:perf_hooks'
+import { createBundle, verifyBundle } from '../src/bundles.js'
+import { prepareDirectory } from '../src/directory.js'
 import { openDatabase } from '../src/native.js'
 import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.js'
-import { tempRoot } from './helpers.js'
+import { countItems, makeLiveDatabase, tempRoot } from './helpers.js'
 
 function configured(config: unknown) {
   return {
@@ -164,6 +166,46 @@ test.group('withOperatorDatabase', (group) => {
     const reopened = openDatabase(live)
     assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'kept' }])
     reopened.close()
+  })
+
+  test('creates a bundle from the pinned Lucid handle and releases it after cleanup', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    const directory = join(root, 'bundles')
+    makeLiveDatabase(live).close()
+    prepareDirectory(directory)
+    const db = lucid(live)
+    let borrowed!: ReturnType<typeof openDatabase>
+    const result = await withOperatorDatabase(db, async (handle) => {
+      borrowed = handle as typeof borrowed
+      const other = openDatabase(live, { timeout: 0 })
+      try {
+        assert.throws(() => other.prepare('SELECT count(*) FROM items').get(), /locked/)
+      } finally {
+        other.close()
+      }
+
+      const bundle = await createBundle({ source: { database: handle }, directory })
+      assert.isTrue((borrowed as typeof borrowed & { open: boolean }).open)
+      assert.equal(countItems(join(bundle.path, 'db.sqlite')), 200)
+      assert.equal(verifyBundle(directory, bundle.name).name, bundle.name)
+      assert.deepEqual(handle.prepare('SELECT count(*) AS n FROM items').get(), { n: 200 })
+      return bundle
+    })
+
+    assert.equal(result.name, verifyBundle(directory).name)
+    assert.isFalse((borrowed as typeof borrowed & { open: boolean }).open)
+    const reopened = openDatabase(live)
+    try {
+      reopened.exec('BEGIN EXCLUSIVE; ROLLBACK')
+      assert.equal(
+        (reopened.prepare('SELECT count(*) AS n FROM items').get() as { n: number }).n,
+        200
+      )
+    } finally {
+      reopened.close()
+    }
   })
 
   test('reports only genuine external contention as stopped-server advice', async ({ assert }) => {
@@ -517,6 +559,103 @@ test.group('withOperatorDatabase', (group) => {
       assert.deepEqual((error as AggregateError).errors, [work, destroy])
     } finally {
       knex.destroyRawConnection = original
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('reports loan pool shutdown failure after still closing the owned handle', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const owner = db.connection().getWriteClient().client.pool as unknown as {
+      constructor: { prototype: { destroy(this: unknown): Promise<unknown> } }
+    }
+    const poolPrototype = owner.constructor.prototype
+    const originalDestroy = poolPrototype.destroy
+    const sentinel = new Error('loan pool destroy failed')
+    let handle!: ReturnType<typeof openDatabase>
+    poolPrototype.destroy = async function (this: unknown) {
+      await originalDestroy.call(this)
+      if (this !== owner) throw sentinel
+    }
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        return 'complete work'
+      })
+      assert.fail('Expected the loan pool failure')
+    } catch (error) {
+      assert.equal(error, sentinel)
+    } finally {
+      poolPrototype.destroy = originalDestroy
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('reports an owner pool that throws while accepting the pinned handle', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const owner = db.connection().getWriteClient().client.pool as unknown as {
+      release(handle: unknown): boolean
+    }
+    const originalRelease = owner.release.bind(owner)
+    const sentinel = new Error('owner release failed')
+    let handle!: ReturnType<typeof openDatabase>
+    owner.release = (borrowed) => {
+      originalRelease(borrowed)
+      throw sentinel
+    }
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        return 'complete work'
+      })
+      assert.fail('Expected owner release failure')
+    } catch (error) {
+      assert.equal(error, sentinel)
+    } finally {
+      owner.release = originalRelease
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('reports native close failure after silent pool cleanup', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const manager = db.manager as unknown as { closeAll(): Promise<void> }
+    const originalCloseAll = manager.closeAll.bind(manager)
+    const probe = openDatabase(live)
+    const handlePrototype = Object.getPrototypeOf(probe) as {
+      close: (this: { name: string }) => void
+    }
+    probe.close()
+    const originalClose = handlePrototype.close
+    const sentinel = new Error('native handle close failed')
+    let handle!: ReturnType<typeof openDatabase>
+    manager.closeAll = async () => {}
+    handlePrototype.close = function () {
+      if (this.name === live) throw sentinel
+      originalClose.call(this)
+    }
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        return 'complete work'
+      })
+      assert.fail('Expected pool cleanup and native close failures')
+    } catch (error) {
+      assert.instanceOf(error, AggregateError)
+      assert.include((error as AggregateError).errors, sentinel)
+    } finally {
+      handlePrototype.close = originalClose
+      manager.closeAll = originalCloseAll
+      await originalCloseAll()
     }
     assert.isFalse((handle as typeof handle & { open: boolean }).open)
   })

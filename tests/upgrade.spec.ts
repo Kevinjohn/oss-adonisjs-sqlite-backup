@@ -340,6 +340,51 @@ test.group('db:upgrade', (group) => {
     assert.isFalse(existsSync(booted.live))
   })
 
+  test('refuses an invalid configured filename before snapshotting or migrating', async ({
+    assert,
+  }) => {
+    const seed = openDatabase(join(root, 'live.db'))
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    } finally {
+      seed.close()
+    }
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const backups = join(root, 'backups')
+    const booted = await bootApp(root, { backups })
+    app = booted.app
+    const db = await booted.app.container.make('lucid.db')
+    const original = db.getRawConnection.bind(db)
+    db.getRawConnection = ((name: string) => {
+      const connection = original(name)
+      return connection
+        ? {
+            ...connection,
+            config: {
+              ...connection.config,
+              connection: {
+                ...(connection.config.connection as Record<string, unknown>),
+                filename: 'file:memory.db',
+              },
+            },
+          }
+        : connection
+    }) as typeof db.getRawConnection
+    try {
+      const command = await booted.upgrade()
+      assert.equal(command.exitCode, 1)
+      assert.include(booted.logs(), 'db:upgrade requires a file-backed SQLite connection')
+    } finally {
+      db.getRawConnection = original
+    }
+    assert.isFalse(existsSync(backups))
+    assert.notInclude(tables(booted.live), 'heroes')
+  })
+
   test('lets migration:run generate schema classes unless told not to', async ({ assert }) => {
     writeMigration(
       root,

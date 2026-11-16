@@ -124,6 +124,25 @@ test.group('verify and prepareRestore', (group) => {
     assert.equal(after.mtimeMs, before.mtimeMs)
   })
 
+  test('prepareRestore preserves a filesystem copy permission error', async ({ assert }) => {
+    const stage = join(root, 'read-only-stage')
+    mkdirSync(stage)
+    chmodSync(stage, 0o500)
+    const target = join(stage, 'staged.db')
+    try {
+      let failure: NodeJS.ErrnoException | undefined
+      try {
+        prepareRestore({ directory, target, livePath: live, name })
+      } catch (error) {
+        failure = error as NodeJS.ErrnoException
+      }
+      assert.equal(failure?.code, 'EACCES')
+      assert.isFalse(existsSync(target))
+    } finally {
+      chmodSync(stage, 0o700)
+    }
+  })
+
   test('restore refuses a target the verification driver would reinterpret', async ({ assert }) => {
     const before = statSync(live)
     const driver = openDatabase(`${live} `, { readonly: true, fileMustExist: true })
@@ -232,5 +251,27 @@ test.group('verify and prepareRestore', (group) => {
       codeOf(() => prepareRestore({ directory, target: join(root, 'b.db'), livePath: live })),
       'E_BACKUP_INVALID'
     )
+  })
+
+  test('reports a bundle pruned after selection as not found', async ({ assert }) => {
+    const target = join(root, 'pruned-stage.db')
+    internalHooks.step = (step, detail) => {
+      if (step === 'restore:checked' && detail === target) rmSync(path, { recursive: true })
+    }
+    try {
+      const error = (() => {
+        try {
+          prepareRestore({ directory, target, livePath: live, name })
+          return undefined
+        } catch (caught) {
+          return caught as NodeJS.ErrnoException & { code?: string; cause?: NodeJS.ErrnoException }
+        }
+      })()
+      assert.equal(error?.code, 'E_BACKUP_NOT_FOUND')
+      assert.equal(error?.cause?.code, 'ENOENT')
+      assert.isFalse(existsSync(target))
+    } finally {
+      delete internalHooks.step
+    }
   })
 })
