@@ -33,7 +33,7 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
   return path
 }
 
-type Handle = NativeDatabase & { open: boolean; __knexUid?: string; __knex__disposed?: boolean }
+type Handle = NativeDatabase & { open: boolean; __knex__disposed?: boolean }
 type Pool = {
   constructor: new (options: Record<string, unknown>) => Pool
   acquireTimeoutMillis: number
@@ -45,6 +45,7 @@ type Pool = {
 type Client = {
   pool: Pool
   config: { pool?: { validate?: (handle: Handle) => boolean | Promise<boolean> } }
+  acquireConnection(): Promise<Handle>
 }
 type Managed = {
   on(event: string, listener: (...args: unknown[]) => void): void
@@ -88,9 +89,7 @@ async function runOperatorDatabase<T>(
     client = db.connection().getWriteClient().client as unknown as Client
     owner = client.pool
     if (!owner) throw new Error('Operator command requires an initialized SQLite pool')
-    handle = await (
-      client as unknown as { acquireConnection(): Promise<Handle> }
-    ).acquireConnection()
+    handle = await client.acquireConnection()
     handle.pragma('busy_timeout = 0')
     handle.pragma('locking_mode = EXCLUSIVE')
     try {
@@ -109,23 +108,32 @@ async function runOperatorDatabase<T>(
 
     const pinned = handle
     let created = false
+    let validationFailure: Error | undefined
     const validate = client.config.pool?.validate
     loan = new owner.constructor({
-      min: 0,
+      min: 1,
       max: 1,
       acquireTimeoutMillis: owner.acquireTimeoutMillis,
       propagateCreateError: true,
       create: async () => {
-        if (created) throw new Error('Operator database handle is no longer available')
+        if (created)
+          throw validationFailure ?? new Error('Operator database handle is no longer available')
         created = true
         return pinned
       },
       destroy: async () => {},
-      validate: async (candidate: Handle) =>
-        candidate === pinned &&
-        candidate.open &&
-        !candidate.__knex__disposed &&
-        (validate ? await validate(candidate) : true),
+      validate: async (candidate: Handle) => {
+        if (candidate !== pinned || !candidate.open || candidate.__knex__disposed) return false
+        if (!validate) return true
+        try {
+          return await validate(candidate)
+        } catch (error) {
+          validationFailure = new Error('Operator database handle is no longer available', {
+            cause: error,
+          })
+          return false
+        }
+      },
     })
     client.pool = loan
     result = await run(pinned)

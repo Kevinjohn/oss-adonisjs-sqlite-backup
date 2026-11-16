@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
 import { EventEmitter } from 'node:events'
+import { performance } from 'node:perf_hooks'
 import { openDatabase } from '../src/native.js'
 import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.js'
 import { tempRoot } from './helpers.js'
@@ -167,14 +168,80 @@ test.group('withOperatorDatabase', (group) => {
       const client = db.connection().getWriteClient().client as unknown as {
         pool: { used: unknown[]; check(): void }
       }
-      // The owner has the pinned lease throughout the callback.
       assert.lengthOf(owner.used, 1)
+      handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('same')")
+      const before = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(before[0].value, 'same')
+      const loan = client.pool as typeof client.pool & { free: Array<{ timestamp: number }> }
+      assert.lengthOf(loan.free, 1)
+      loan.free[0].timestamp = Date.now() - 60_000
+      loan.check()
       owner.check()
       assert.isTrue((handle as typeof handle & { open: boolean }).open)
-      const query = await db.rawQuery('SELECT 1 AS value')
-      assert.equal(query[0].value, 1)
+      const query = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(query[0].value, 'same')
       assert.notEqual(client.pool, owner)
     })
+  })
+
+  test('keeps the same handle after its configured lifetime expires', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, { maxConnectionLifetimeMillis: 50 })
+    await withOperatorDatabase(db, async (handle) => {
+      handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('same')")
+      ;(handle as typeof handle & { __knexLifetimeLimit: number }).__knexLifetimeLimit =
+        performance.now() - 1
+      assert.isBelow(
+        (handle as typeof handle & { __knexLifetimeLimit: number }).__knexLifetimeLimit,
+        performance.now()
+      )
+      const rows = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(rows[0].value, 'same')
+      assert.isTrue((handle as typeof handle & { open: boolean }).open)
+    })
+  })
+
+  test('queues a write behind a transaction without joining its rollback', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    const db = lucid(live)
+    await withOperatorDatabase(db, async () => {
+      const trx = await db.transaction()
+      await trx.table('heroes').insert({ name: 'rolled back' })
+      const client = db.connection().getWriteClient().client as unknown as {
+        pool: {
+          on(event: string, listener: () => void): void
+          removeListener(event: string, listener: () => void): void
+        }
+      }
+      let requested!: () => void
+      const demand = new Promise<void>((resolve) => {
+        requested = resolve
+      })
+      client.pool.on('acquireRequest', requested)
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const queued = Promise.resolve(db.table('heroes').insert({ name: 'kept' }))
+        await Promise.race([
+          demand,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Queued acquisition did not start')), 1000)
+          }),
+        ])
+        await trx.rollback()
+        await queued
+      } finally {
+        if (timer) clearTimeout(timer)
+        client.pool.removeListener('acquireRequest', requested)
+        if (!trx.isCompleted) await trx.rollback()
+      }
+    })
+    const reopened = openDatabase(live)
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'kept' }])
+    reopened.close()
   })
 
   test('surfaces real Lucid disconnect errors and closes the native handle', async ({ assert }) => {
@@ -230,6 +297,45 @@ test.group('withOperatorDatabase', (group) => {
       }
     })
     assert.equal(afterCreate, 1)
+    const reopened = openDatabase(live)
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [])
+    reopened.close()
+  })
+
+  test('preserves the cause of a throwing validator', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    const sentinel = new Error('validator failed')
+    let reject = false
+    let created = 0
+    const db = lucid(live, {
+      validate: () => {
+        if (reject) throw sentinel
+        return true
+      },
+      afterCreate: (_handle: unknown, done: () => void) => {
+        created++
+        done()
+      },
+    })
+    await withOperatorDatabase(db, async () => {
+      reject = true
+      try {
+        await db.table('heroes').insert({ name: 'forbidden' })
+        assert.fail('Expected validation failure')
+      } catch (error) {
+        assert.equal((error as Error).cause, sentinel)
+      }
+      const other = openDatabase(live, { timeout: 0 })
+      try {
+        assert.throws(() => other.prepare('SELECT name FROM heroes').all(), /locked/)
+      } finally {
+        other.close()
+      }
+    })
+    assert.equal(created, 1)
     const reopened = openDatabase(live)
     assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [])
     reopened.close()
