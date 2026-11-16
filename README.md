@@ -81,7 +81,8 @@ with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
   the same path.
 - The snapshot records the primary connection's migrations table and follows the backup config's
   `lockTimeoutMs` and `requireWal`, like `db:backup create`.
-- An empty or in-memory database is migrated without a snapshot.
+- A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
+  without a snapshot. Views or SQLite header metadata alone do not meet the table condition.
 - If the snapshot cannot be written, nothing is migrated and the command exits 1 with
   `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
 - The primary connection must use `better-sqlite3`.
