@@ -45,6 +45,7 @@ test('files the specs read run the full suite without building the package', ({ 
     'tests/helpers.ts',
     'tests/fixtures/child.ts',
     'CHANGELOG.md',
+    'user-stories/README.md',
     '.github/workflows/checks.yml',
   ]) {
     const commands = ran(planChangedChecks(changed(path)))
