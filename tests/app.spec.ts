@@ -5,7 +5,7 @@
 import { test } from '@japa/runner'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
-import { chmodSync, existsSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
@@ -81,6 +81,30 @@ test('refused implicit create leaves an unsafe root permission unchanged', async
     command.assertFailed()
     command.assertLogMatches(/E_BACKUP_UNSAFE/)
     assert.equal(statSync(root).mode & 0o777, before)
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
+
+test('create refuses a configured file root without changing its mode or bytes', async ({
+  assert,
+}) => {
+  const { root, cleanup } = tempRoot()
+  const directory = join(root, 'backup-root')
+  const bytes = Buffer.from('preserve configured file')
+  writeFileSync(directory, bytes, { mode: 0o644 })
+  const beforeMode = statSync(directory).mode & 0o777
+  const { app, live } = await bootApp(root, true, directory)
+  try {
+    openDatabase(live).close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/E_BACKUP_UNSAFE/)
+    assert.equal(statSync(directory).mode & 0o777, beforeMode)
+    assert.deepEqual(readFileSync(directory), bytes)
   } finally {
     await app.terminate()
     cleanup()
