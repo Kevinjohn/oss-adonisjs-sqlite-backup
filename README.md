@@ -72,6 +72,12 @@ manifest field `migrations: { table, count, last }` records the journal's row co
 Verify and restore preparation check that metadata against the copy. Databases without the table
 keep their manifests free of this field.
 
+Verification uses package-opened SQLite connections. Functions, collations or extensions
+registered only on the application's connection are not available to those connections. A schema
+that depends on them, such as an expression index using an application-registered function, may
+fail backup verification; the package then refuses to publish the bundle. The package has no
+initializer hook for registering connection-local SQL features on its verification connections.
+
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
