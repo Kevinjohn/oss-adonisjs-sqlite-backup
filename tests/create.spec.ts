@@ -2,7 +2,15 @@ import { prepared } from './helpers.js'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs'
 import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { checkDatabase } from '../src/checks.js'
@@ -10,6 +18,7 @@ import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { bundleName } from '../src/names.js'
 import { openDatabase } from '../src/native.js'
+import { SqliteBackup } from '../src/sqlite_backup.js'
 import {
   countItems,
   makeLiveDatabase,
@@ -28,6 +37,61 @@ test.group('createBundle', (group) => {
   group.each.setup(() => {
     ;({ root, cleanup } = tempRoot())
     return () => cleanup()
+  })
+
+  test('owned reads refuse a source filename changed by the native driver', async ({ assert }) => {
+    const ordinary = join(root, 'live.db')
+    const spaced = `${ordinary} `
+    const alias = join(root, 'alias.db')
+    const directory = join(root, 'backups')
+    const original = makeLiveDatabase(join(root, 'original.db'), { rows: 3 })
+    original.close()
+    assert.equal(countItems(join(root, 'original.db')), 3)
+    renameSync(join(root, 'original.db'), spaced)
+    makeLiveDatabase(ordinary, { rows: 7 }).close()
+    assert.equal(countItems(ordinary), 7)
+    const spacedBytes = readFileSync(spaced)
+    const ordinaryBytes = readFileSync(ordinary)
+    symlinkSync(spaced, alias)
+
+    const config = {
+      connection: 'main',
+      connections: { main: { client: 'sqlite3', connection: { filename: spaced } } },
+    }
+    const service = new SqliteBackup(
+      { directory, keep: 7, lockTimeoutMs: 0, requireWal: false },
+      config
+    )
+    prepared({ directory })
+    for (const check of [
+      () => service.checkSource(),
+      () => service.create(),
+      () => createBundle(prepared({ livePath: spaced, directory })),
+      () => createBundle(prepared({ livePath: alias, directory })),
+    ]) {
+      const error = await Promise.resolve()
+        .then(check)
+        .catch((caught: unknown) => caught)
+      assert.equal((error as { code?: string } | undefined)?.code, 'E_BACKUP_SOURCE')
+      assert.match(String(error), /better-sqlite3 changes its filename/)
+    }
+    assert.deepEqual(readFileSync(spaced), spacedBytes)
+    assert.deepEqual(readFileSync(ordinary), ordinaryBytes)
+    assert.deepEqual(
+      readdirSync(directory).filter((name) => name.startsWith('bak-')),
+      []
+    )
+
+    const normal = new SqliteBackup(
+      { directory, keep: 7, lockTimeoutMs: 0, requireWal: false },
+      {
+        connection: 'main',
+        connections: { main: { client: 'sqlite3', connection: { filename: ordinary } } },
+      }
+    )
+    normal.checkSource()
+    const result = await normal.create()
+    assert.equal(countItems(join(result.path, 'db.sqlite')), 7)
   })
 
   test('publishes db, manifest and READY; files are read-only', async ({ assert }) => {
