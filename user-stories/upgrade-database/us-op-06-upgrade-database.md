@@ -17,7 +17,7 @@ As a host operator, I want `db:upgrade` to take a verified snapshot of the SQLit
 | `--no-schema-generate` | Boolean flag | Optional; `--schema-generate` defaults to true. When off, `--no-schema-generate` is passed on to `migration:run` |
 
 - The command refuses with `Upgrade failed: …` and exit code 1 when the primary connection is not `better-sqlite3`.
-- An empty database (no table in `sqlite_master`) or an in-memory database is migrated without a snapshot.
+- A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated without a snapshot. Views or SQLite header metadata alone do not meet the table condition.
 - Otherwise it writes a verified bundle to `pre-migration` under the configured backup `directory`, or to `<database>.backups` beside the database when no directory is configured, and reports `Pre-upgrade backup written <path>`. These bundles are outside `db:backup prune` retention.
 - The snapshot uses the primary connection's migrations table (`migrations.tableName`, default `adonis_schema`) and the backup config's `lockTimeoutMs` and `requireWal`, as `db:backup create` does. A non-WAL source is reported as a warning, or refused with `requireWal: true`.
 - If the snapshot cannot be written, nothing is migrated and the command exits 1. Otherwise it runs `migration:run --force`; a failed migration exits with that command's exit code.
