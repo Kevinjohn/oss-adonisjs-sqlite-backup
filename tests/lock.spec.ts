@@ -103,6 +103,35 @@ test.group('Directory lock', () => {
     }
   })
 
+  test('a single falsy rollback failure is still thrown after close succeeds', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+    }
+    const originalExec = prototype.exec
+    const lock = acquireLock(root)
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK') throw undefined
+      return originalExec.call(this, sql)
+    }
+    try {
+      let caught = false
+      try {
+        lock.release()
+      } catch (error) {
+        caught = true
+        assert.isUndefined(error)
+      }
+      assert.isTrue(caught)
+      lock.release()
+      prototype.exec = originalExec
+      acquireLock(root).release()
+    } finally {
+      prototype.exec = originalExec
+      cleanup()
+    }
+  })
+
   test('failed acquisition retains a non-Error primary and close failure', ({ assert }) => {
     const { root, cleanup } = tempRoot()
     const prototype = Database.prototype as {
