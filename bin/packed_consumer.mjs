@@ -29,7 +29,17 @@ const run = (command, args) => {
 }
 
 try {
-  await writeFile(join(root, 'package.json'), JSON.stringify({ private: true, type: 'module' }))
+  await writeFile(
+    join(root, 'package.json'),
+    JSON.stringify({ private: true, type: 'module', packageManager: manifest.packageManager })
+  )
+  const consumerPnpm = spawnSync('pnpm', ['--version'], { cwd: root, encoding: 'utf8' })
+  assert.equal(consumerPnpm.status, 0, 'pnpm must be available inside the consumer')
+  assert.equal(
+    consumerPnpm.stdout.trim(),
+    manifest.packageManager.split('@')[1],
+    'consumer pnpm version must match packageManager'
+  )
   run('pnpm', [
     'add',
     '--allow-build=better-sqlite3',
