@@ -28,6 +28,12 @@ node ace configure @kevinjohn/adonisjs-sqlite-backup
 | `node ace db:backup restore-prepare --target path [--bundle name]` | Copies a bundle to a new path and verifies the copy. Never replaces the live database            | no   |
 | `node ace db:backup prune [--keep n]`                              | Keeps the newest `n` READY bundles (default: `keep` in config) and removes unfinished ones       | yes  |
 
+Prune counts READY markers; it does not verify each bundle's database. READY means published, not
+that the bundle remains readable or recoverable. Before pruning, verify recovery points with
+`db:backup verify` and retain a separate known-good copy until the recovery point you intend to
+keep has passed verification. A damaged READY bundle still counts toward `--keep` and can displace
+an older usable bundle from retention.
+
 A bundle is a real directory (never a symlink) named `bak-utc-YYYYMMDD-HHMMSS-mmm` with a valid
 date, holding `db.sqlite`, `manifest.json` and `READY`, all read-only. Names only increase within
 a directory, so name order is age order for prune. A clock step back of up to 24 h is absorbed;
