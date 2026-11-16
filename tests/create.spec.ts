@@ -1,4 +1,6 @@
 import { prepared } from './helpers.js'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
@@ -112,6 +114,43 @@ test.group('createBundle', (group) => {
     } finally {
       delete internalHooks.durability
       delete internalHooks.step
+    }
+  })
+
+  test('source close failure preserves the create error and still releases the lock', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    let failedHandle: { name: string } | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        failedHandle = this
+        throw new Error('source close failed')
+      }
+      originalClose.call(this)
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('copy interrupted')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /copy interrupted/)
+      assert.match(
+        String((error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors?.[0]),
+        /source close failed/
+      )
+      acquireLock(directory).release()
+    } finally {
+      delete internalHooks.step
+      prototype.close = originalClose
+      if (failedHandle) originalClose.call(failedHandle)
     }
   })
 

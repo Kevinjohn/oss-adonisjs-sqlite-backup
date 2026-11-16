@@ -1,4 +1,6 @@
 import { test } from '@japa/runner'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { acquireLock } from '../src/lock.js'
@@ -15,6 +17,51 @@ test.group('Directory lock', () => {
       acquireLock(root).release()
     } finally {
       cleanup()
+    }
+  })
+
+  test('release attempts close after rollback fails and can be retried after close fails', ({
+    assert,
+  }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    let failClose = true
+    const lock = acquireLock(root)
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK')
+        throw new Error('rollback failed')
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock') && failClose) throw new Error('close failed')
+      originalClose.call(this)
+    }
+    try {
+      let error: (Error & { cleanupError?: Error }) | undefined
+      try {
+        lock.release()
+      } catch (caught) {
+        error = caught as Error & { cleanupError?: Error }
+      }
+      assert.match(String(error), /rollback failed/)
+      assert.match(String(error?.cleanupError), /close failed/)
+      prototype.exec = originalExec
+      failClose = false
+      lock.release()
+      acquireLock(root).release()
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        lock.release()
+      } finally {
+        cleanup()
+      }
     }
   })
 

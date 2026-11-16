@@ -189,6 +189,10 @@ export async function createBundle(
   const warnings: string[] = []
   let bundlePath: string | undefined
   let source: NativeDatabase | undefined
+  let primaryError: unknown
+  let failed = false
+  let result: CreateResult | undefined
+  const cleanupErrors: unknown[] = []
   try {
     let journalMode: string
     try {
@@ -294,8 +298,10 @@ export async function createBundle(
     writeDurable(join(bundlePath, READY), '')
     syncPath(bundlePath)
     syncPath(directory)
-    return { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
+    result = { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
   } catch (error) {
+    failed = true
+    primaryError = error
     if (bundlePath) {
       try {
         const marker = join(bundlePath, READY)
@@ -310,9 +316,33 @@ export async function createBundle(
           Object.defineProperty(error, 'cleanupError', { value: cleanupError })
       }
     }
-    throw error
   } finally {
-    if (!borrowed) source?.close()
-    lock.release()
+    try {
+      if (!borrowed) source?.close()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    try {
+      lock.release()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
   }
+  if (failed) {
+    if (cleanupErrors.length) {
+      if (primaryError instanceof Error)
+        Object.defineProperty(primaryError, 'resourceCleanupErrors', { value: cleanupErrors })
+      else
+        throw new AggregateError(
+          [primaryError, ...cleanupErrors],
+          'bundle creation and cleanup failed'
+        )
+    }
+    throw primaryError
+  }
+  if (cleanupErrors.length)
+    throw cleanupErrors.length === 1
+      ? cleanupErrors[0]
+      : new AggregateError(cleanupErrors, 'native resource cleanup failed')
+  return result!
 }
