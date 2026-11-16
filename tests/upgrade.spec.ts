@@ -343,7 +343,12 @@ test.group('db:upgrade', (group) => {
   test('refuses an invalid configured filename before snapshotting or migrating', async ({
     assert,
   }) => {
-    openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    const seed = openDatabase(join(root, 'live.db'))
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    } finally {
+      seed.close()
+    }
     writeMigration(
       root,
       '001_heroes',
