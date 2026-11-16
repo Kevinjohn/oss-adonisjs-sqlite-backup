@@ -7,7 +7,7 @@ import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { DATABASE } from './names.js'
 import { realPath } from './paths.js'
-import { isWithin } from './source.js'
+import { isWithin, normalizeConfiguredSqliteFilename } from './source.js'
 
 /** Exists in any form, including a dangling symlink (unlike existsSync). */
 const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined
@@ -24,6 +24,12 @@ export function prepareRestore(input: {
   name?: string
 }): { bundle: string; target: string } {
   const target = realPath(input.target)
+  if (normalizeConfiguredSqliteFilename(target, 'better-sqlite3') !== target) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      'restore target changes when opened by the SQLite verification driver'
+    )
+  }
   const livePath = realPath(input.livePath)
   const directory = realPath(input.directory)
   assertDirectory(directory, true)

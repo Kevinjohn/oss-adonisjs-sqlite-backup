@@ -14,6 +14,7 @@ import { join } from 'node:path'
 import { createBundle, verifyBundle } from '../src/bundles.js'
 import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
+import { openDatabase } from '../src/native.js'
 import { prepareRestore } from '../src/restore.js'
 import { countItems, makeLiveDatabase, overwrite, tempRoot } from './helpers.js'
 
@@ -121,6 +122,36 @@ test.group('verify and prepareRestore', (group) => {
     const after = statSync(live)
     assert.equal(after.ino, before.ino)
     assert.equal(after.mtimeMs, before.mtimeMs)
+  })
+
+  test('restore refuses a target the verification driver would reinterpret', async ({ assert }) => {
+    const before = statSync(live)
+    const driver = openDatabase(`${live} `, { readonly: true, fileMustExist: true })
+    try {
+      const main = (driver.pragma('database_list') as Array<{ name: string; file: string }>).find(
+        (entry) => entry.name === 'main'
+      )
+      assert.equal(main?.file, live)
+    } finally {
+      driver.close()
+    }
+    const target = join(root, 'staged.db ')
+    assert.equal(
+      codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      'E_BACKUP_UNSAFE'
+    )
+    assert.equal(
+      codeOf(() => prepareRestore({ directory, target: `${live} `, livePath: live })),
+      'E_BACKUP_UNSAFE'
+    )
+    assert.isFalse(existsSync(target))
+    assert.isFalse(existsSync(join(root, 'staged.db')))
+    assert.equal(statSync(live).mtimeMs, before.mtimeMs)
+
+    const valid = join(root, ' staged.db')
+    const staged = prepareRestore({ directory, target: valid, livePath: live })
+    assert.equal(staged.target, valid)
+    assert.equal(countItems(valid), 200)
   })
 
   test('prepareRestore refuses the live path, existing targets and stale sidecars', async ({
