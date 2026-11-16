@@ -51,13 +51,7 @@ export function realPath(path: string): string {
       current = next
       continue
     }
-    let stat
-    try {
-      stat = lstatSync(next, { throwIfNoEntry: false })
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      stat = undefined
-    }
+    const stat = lstatSync(next, { throwIfNoEntry: false })
     if (!stat?.isSymbolicLink()) {
       missing = stat === undefined
       directory = missing || !!stat?.isDirectory()
