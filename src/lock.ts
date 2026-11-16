@@ -1,5 +1,7 @@
 import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } from 'node:fs'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import { BackupException } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
 import { realPath } from './paths.js'
@@ -130,5 +132,21 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       if (rollbackFailed) throw rollbackError
       if (closeFailed) throw closeError
     },
+  }
+}
+
+/** Wait for a create lock without blocking the event loop needed by an in-process backup. */
+export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
+  validateLockTimeout(timeoutMs)
+  const deadline = performance.now() + timeoutMs
+  while (true) {
+    try {
+      return acquireLock(directory)
+    } catch (error) {
+      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_LOCKED') throw error
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) throw error
+      await delay(Math.min(remaining, 10))
+    }
   }
 }

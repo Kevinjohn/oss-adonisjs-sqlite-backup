@@ -18,7 +18,7 @@ import { BackupException } from './errors.js'
 import { realPath } from './paths.js'
 import { sha256File, syncPath, writeDurable } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
-import { acquireLock } from './lock.js'
+import { acquireCreateLock } from './lock.js'
 import { DATABASE, MANIFEST, READY, bundleName, isBundleName, parseBundleName } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 import { assertSafeLayout, borrowedSourcePath } from './source.js'
@@ -185,7 +185,7 @@ export async function createBundle(
   const directory = realPath(input.directory)
   assertDirectory(directory, true)
   assertSafeLayout(livePath, directory)
-  const lock = acquireLock(directory, lockTimeoutMs)
+  const lock = await acquireCreateLock(directory, lockTimeoutMs)
   const warnings: string[] = []
   let bundlePath: string | undefined
   let source: NativeDatabase | undefined
