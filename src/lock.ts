@@ -90,6 +90,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   try {
     handle = tryLock(path, timeoutMs)
   } catch (error) {
+    if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
     const code = (error as { code?: string }).code
     if (code === 'SQLITE_BUSY') {
       throw new BackupException('E_BACKUP_LOCKED', `backup directory ${directory} is locked`, {
