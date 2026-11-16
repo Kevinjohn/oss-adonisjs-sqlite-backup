@@ -243,10 +243,19 @@ test.group('Directory lock', () => {
     } finally {
       prototype.exec = originalExec
       prototype.close = originalClose
-      if (!holderReleased) holder.release()
-      acquiredLock?.release()
-      if (failedHandle) originalClose.call(failedHandle)
-      cleanup()
+      try {
+        if (!holderReleased) holder.release()
+      } finally {
+        try {
+          acquiredLock?.release()
+        } finally {
+          try {
+            if (failedHandle) originalClose.call(failedHandle)
+          } finally {
+            cleanup()
+          }
+        }
+      }
     }
   }).timeout(20_000)
 
