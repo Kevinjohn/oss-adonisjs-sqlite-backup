@@ -104,11 +104,14 @@ Three exports support commands that must own the database while the server is st
 - `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
   example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
   pool of one, and the database is an existing file. It returns the file path.
-- `withOperatorDatabase(db, work)` puts the pool's only handle in EXCLUSIVE locking mode, runs
-  `work(connection)`, then closes every connection. Lucid queries inside `work` use that handle. If
-  another process has the file open it throws
-  `Another process holds this database; stop the server and retry`. The pool is closed after every
-  outcome; when a cleanup step also fails, an `AggregateError` carries both failures.
+- `withOperatorDatabase(db, work)` keeps the pool's only handle checked out in EXCLUSIVE locking
+  mode through `work(connection)`, then closes every managed connection. Lucid queries and
+  transactions inside `work` borrow that handle in sequence. Actual lock contention throws
+  `Another process holds this database; stop the server and retry`; an idle open connection alone
+  does not imply contention or prove that a server is running. Failed cleanup is reported, including
+  lifecycle failures emitted by Lucid and the pool. When work and cleanup both fail, an
+  `AggregateError` preserves the failures in order. The callback must finish its transactions and
+  leave the borrowed handle open.
 - `syncPath(path)` fsyncs a file or directory.
 
 ```ts

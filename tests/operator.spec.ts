@@ -1,7 +1,8 @@
 import { test } from '@japa/runner'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import type { Database } from '@adonisjs/lucid/database'
+import { Database } from '@adonisjs/lucid/database'
+import { EventEmitter } from 'node:events'
 import { openDatabase } from '../src/native.js'
 import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.js'
 import { tempRoot } from './helpers.js'
@@ -31,6 +32,7 @@ test.group('operatorDatabasePath', (group) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
     assert.equal(operatorDatabasePath(configured(sqlite(live)), true), live)
+    assert.equal(operatorDatabasePath(configured(sqlite(` ${live} `)), true), live)
   })
 
   test('refuses without the operator confirmation, before reading any configuration', ({
@@ -61,7 +63,13 @@ test.group('operatorDatabasePath', (group) => {
 
   test('refuses an in-memory, missing or non-file database', ({ assert }) => {
     mkdirSync(join(root, 'directory.db'))
-    for (const filename of [':memory:', join(root, 'missing.db'), join(root, 'directory.db')]) {
+    for (const filename of [
+      ':memory:',
+      ' :memory: ',
+      ' ',
+      join(root, 'missing.db'),
+      join(root, 'directory.db'),
+    ]) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
         'Operator commands require an existing on-disk database'
@@ -70,24 +78,22 @@ test.group('operatorDatabasePath', (group) => {
   })
 })
 
-/** A Lucid-shaped pool of one over a real handle, recording whether the pool was closed. */
-function pool(path: string) {
-  const handle = openDatabase(path)
-  const state = { closed: false }
-  const db = {
-    connection: () => ({
-      getWriteClient: () => ({
-        client: { acquireConnection: async () => handle, releaseConnection: async () => {} },
-      }),
-    }),
-    manager: {
-      closeAll: async () => {
-        state.closed = true
-        handle.close()
+const logger = new Proxy({}, { get: () => () => {} })
+function lucid(path: string, pool: Record<string, unknown> = {}) {
+  return new Database(
+    {
+      connection: 'sqlite',
+      connections: {
+        sqlite: {
+          client: 'better-sqlite3',
+          connection: { filename: path },
+          pool: { min: 0, max: 1, ...pool },
+        },
       },
     },
-  } as unknown as Database
-  return { db, state }
+    logger as never,
+    Object.assign(new EventEmitter(), { hasListeners: () => false }) as never
+  )
 }
 
 test.group('withOperatorDatabase', (group) => {
@@ -98,175 +104,259 @@ test.group('withOperatorDatabase', (group) => {
     return temp.cleanup
   })
 
-  test('holds the file exclusively during the work and closes the pool afterwards', async ({
-    assert,
-  }) => {
+  test('pins the Lucid handle across ordinary queries and transactions', async ({ assert }) => {
     const live = join(root, 'live.db')
-    openDatabase(live).exec('CREATE TABLE heroes (name TEXT)')
-    const { db, state } = pool(live)
-    const result = await withOperatorDatabase(db, async (connection) => {
-      connection.prepare('INSERT INTO heroes (name) VALUES (?)').run('Diana Prince')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    const db = lucid(live)
+    const result = await withOperatorDatabase(db, async (handle) => {
+      handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('pinned')")
       const other = openDatabase(live, { timeout: 0 })
       try {
         assert.throws(() => other.prepare('SELECT name FROM heroes').all(), /locked/)
       } finally {
         other.close()
       }
+      const marker = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(marker[0].value, 'pinned')
+      await db.table('heroes').insert({ name: 'kept' })
+      const trx = await db.transaction()
+      await trx.table('heroes').insert({ name: 'rolled back' })
+      await trx.rollback()
       return 'done'
     })
     assert.equal(result, 'done')
-    assert.isTrue(state.closed)
     const reopened = openDatabase(live)
-    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'Diana Prince' }])
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'kept' }])
     reopened.close()
   })
 
-  test('refuses when another process holds the database, and still closes the pool', async ({
-    assert,
-  }) => {
+  test('reports only genuine external contention as stopped-server advice', async ({ assert }) => {
     const live = join(root, 'live.db')
     const holder = openDatabase(live)
     holder.exec('CREATE TABLE heroes (name TEXT); BEGIN IMMEDIATE')
-    const { db, state } = pool(live)
-    let entered = false
+    const db = lucid(live)
     try {
       await assert.rejects(
-        () =>
-          withOperatorDatabase(db, async () => {
-            entered = true
-          }),
-        'Another process holds this database; stop the server and retry'
+        () => withOperatorDatabase(db, async () => assert.fail('entered')),
+        /Another process holds/
       )
     } finally {
       holder.exec('ROLLBACK')
       holder.close()
     }
-    assert.isFalse(entered)
-    assert.isTrue(state.closed)
+    const idle = openDatabase(live)
+    const next = lucid(live)
+    try {
+      assert.equal(await withOperatorDatabase(next, async () => 'entered'), 'entered')
+    } finally {
+      idle.close()
+    }
   })
 
-  test('closes the pool when {$self} fails')
-    .with(['acquire', 'setup', 'release', 'callback'] as const)
-    .run(async ({ assert }, stage) => {
-      let closed = false
-      let entered = false
-      const failure = new Error(`fixture-${stage}`)
-      const client = {
-        async acquireConnection() {
-          if (stage === 'acquire') throw failure
-          return {
-            pragma() {
-              if (stage === 'setup') throw failure
-            },
-            exec() {},
-          }
-        },
-        async releaseConnection() {
-          if (stage === 'release') throw failure
-        },
+  test('retains the original lease across the owning pool reaper', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, { idleTimeoutMillis: 1, reapIntervalMillis: 1000 })
+    const owner = db.connection().getWriteClient().client.pool as unknown as {
+      used: unknown[]
+      check(): void
+    }
+    await withOperatorDatabase(db, async (handle) => {
+      const client = db.connection().getWriteClient().client as unknown as {
+        pool: { used: unknown[]; check(): void }
       }
-      const db = {
-        connection: () => ({ getWriteClient: () => ({ client }) }),
-        manager: {
-          closeAll: async () => {
-            closed = true
-          },
-        },
-      } as unknown as Database
-      await assert.rejects(
-        () =>
-          withOperatorDatabase(db, async () => {
-            entered = true
-            throw failure
-          }),
-        failure.message
-      )
-      assert.isTrue(closed)
-      assert.equal(entered, stage === 'callback')
+      // The owner has the pinned lease throughout the callback.
+      assert.lengthOf(owner.used, 1)
+      owner.check()
+      assert.isTrue((handle as typeof handle & { open: boolean }).open)
+      const query = await db.rawQuery('SELECT 1 AS value')
+      assert.equal(query[0].value, 1)
+      assert.notEqual(client.pool, owner)
     })
-
-  test('wraps a non-Error lock failure', async ({ assert }) => {
-    const client = {
-      acquireConnection: async () => ({
-        pragma() {
-          throw 'driver refused'
-        },
-        exec() {},
-      }),
-      releaseConnection: async () => {},
-    }
-    const db = {
-      connection: () => ({ getWriteClient: () => ({ client }) }),
-      manager: { closeAll: async () => {} },
-    } as unknown as Database
-    await assert.rejects(() => withOperatorDatabase(db, async () => {}), 'Operator lock failed')
   })
 
-  test('reports a lock failure and a failed release together', async ({ assert }) => {
-    const lock = new Error('lock refused')
-    const release = new Error('release failed')
-    const client = {
-      acquireConnection: async () => ({
-        pragma() {
-          throw lock
-        },
-        exec() {},
-      }),
-      releaseConnection: async () => {
-        throw release
-      },
-    }
-    const db = {
-      connection: () => ({ getWriteClient: () => ({ client }) }),
-      manager: { closeAll: async () => {} },
-    } as unknown as Database
+  test('keeps the same handle after its configured lifetime expires', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, { maxConnectionLifetimeMillis: 50 })
+    await withOperatorDatabase(db, async (handle) => {
+      handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('same')")
+      ;(handle as typeof handle & { __knexLifetimeLimit: number }).__knexLifetimeLimit =
+        Date.now() - 1
+      const rows = await db.rawQuery('SELECT value FROM marker')
+      assert.equal(rows[0].value, 'same')
+      assert.isTrue((handle as typeof handle & { open: boolean }).open)
+    })
+  })
+
+  test('queues a write behind a transaction without joining its rollback', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    const db = lucid(live)
+    await withOperatorDatabase(db, async () => {
+      const trx = await db.transaction()
+      await trx.table('heroes').insert({ name: 'rolled back' })
+      const queued = Promise.resolve(db.table('heroes').insert({ name: 'kept' }))
+      const client = db.connection().getWriteClient().client as unknown as {
+        pool: { numPendingAcquires(): number }
+      }
+      while (client.pool.numPendingAcquires() === 0) await Promise.resolve()
+      await trx.rollback()
+      await queued
+    })
+    const reopened = openDatabase(live)
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [{ name: 'kept' }])
+    reopened.close()
+  })
+
+  test('surfaces real Lucid disconnect errors and closes the native handle', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const failure = new Error('destroy rejected')
+    let handle!: ReturnType<typeof openDatabase>
+    const knex = db.connection().getWriteClient().client as unknown as { destroy(): Promise<void> }
+    const original = knex.destroy.bind(knex)
     try {
-      await withOperatorDatabase(db, async () => {})
-      assert.fail('Expected both failures')
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        knex.destroy = async () => {
+          throw failure
+        }
+      })
+      assert.fail('Expected the destroy failure')
+    } catch (error) {
+      assert.equal(error, failure)
+    } finally {
+      knex.destroy = original
+      await original()
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('does not replace a handle rejected by the configured validator', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    const seed = openDatabase(live)
+    seed.exec('CREATE TABLE heroes (name TEXT)')
+    seed.close()
+    let allowed = true
+    let afterCreate = 0
+    const db = lucid(live, {
+      validate: () => allowed,
+      afterCreate: (_handle: unknown, done: () => void) => {
+        afterCreate++
+        done()
+      },
+    })
+    await withOperatorDatabase(db, async () => {
+      allowed = false
+      await assert.rejects(
+        () => db.table('heroes').insert({ name: 'forbidden' }),
+        /no longer available/
+      )
+      const other = openDatabase(live, { timeout: 0 })
+      try {
+        assert.throws(() => other.prepare('SELECT name FROM heroes').all(), /locked/)
+      } finally {
+        other.close()
+      }
+    })
+    assert.equal(afterCreate, 1)
+    const reopened = openDatabase(live)
+    assert.deepEqual(reopened.prepare('SELECT name FROM heroes').all(), [])
+    reopened.close()
+  })
+
+  test('rejects a second operator while the first owns the lease', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    let resume!: () => void
+    const held = new Promise<void>((resolve) => {
+      resume = resolve
+    })
+    let entered!: () => void
+    const started = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    const first = withOperatorDatabase(db, async () => {
+      entered()
+      await held
+    })
+    await started
+    try {
+      await assert.rejects(() => withOperatorDatabase(db, async () => {}), /already using/)
+    } finally {
+      resume()
+      await first
+    }
+  })
+
+  test('reports an unowned original release even when manager cleanup resolves', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const owner = db.connection().getWriteClient().client.pool as unknown as {
+      release(handle: unknown): boolean
+    }
+    await assert.rejects(
+      () =>
+        withOperatorDatabase(db, async (handle) => {
+          assert.isTrue(owner.release(handle))
+        }),
+      /refused the handle release/
+    )
+  })
+
+  test('reports the real pool destroy failure and preserves an earlier work error', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const work = new Error('work failed')
+    const destroy = new Error('native destroy failed')
+    const knex = db.connection().getWriteClient().client as unknown as {
+      destroyRawConnection(handle: unknown): Promise<void>
+    }
+    const original = knex.destroyRawConnection.bind(knex)
+    let handle!: ReturnType<typeof openDatabase>
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        knex.destroyRawConnection = async () => {
+          throw destroy
+        }
+        throw work
+      })
+      assert.fail('Expected work and destroy failures')
     } catch (error) {
       assert.instanceOf(error, AggregateError)
-      assert.equal((error as AggregateError).message, 'Operator lock release failed')
-      assert.deepEqual((error as AggregateError).errors, [lock, release])
+      assert.deepEqual((error as AggregateError).errors, [work, destroy])
+    } finally {
+      knex.destroyRawConnection = original
     }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
   })
 
-  test('reports the first failure and a failed pool close together', async ({ assert }) => {
-    const failure = new Error('original acquisition failure')
-    const cleanup = new Error('pool cleanup failure')
-    const db = {
-      connection: () => {
-        throw failure
+  test('preserves non-contention setup errors', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, {
+      afterCreate: (handle: ReturnType<typeof openDatabase>, done: () => void) => {
+        handle.exec('BEGIN')
+        done()
       },
-      manager: {
-        closeAll: async () => {
-          throw cleanup
-        },
-      },
-    } as unknown as Database
-    try {
-      await withOperatorDatabase(db, async () => undefined)
-      assert.fail('Expected both failures')
-    } catch (error) {
-      assert.instanceOf(error, AggregateError)
-      assert.equal((error as AggregateError).message, 'Operator database cleanup failed')
-      assert.deepEqual((error as AggregateError).errors, [failure, cleanup])
-    }
-  })
-
-  test('reports a failed pool close after successful work', async ({ assert }) => {
-    const cleanup = new Error('pool cleanup failure')
-    const client = {
-      acquireConnection: async () => ({ pragma() {}, exec() {} }),
-      releaseConnection: async () => {},
-    }
-    const db = {
-      connection: () => ({ getWriteClient: () => ({ client }) }),
-      manager: {
-        closeAll: async () => {
-          throw cleanup
-        },
-      },
-    } as unknown as Database
-    await assert.rejects(() => withOperatorDatabase(db, async () => 'done'), cleanup.message)
+    })
+    await assert.rejects(
+      () => withOperatorDatabase(db, async () => assert.fail('entered')),
+      /transaction/
+    )
   })
 })
