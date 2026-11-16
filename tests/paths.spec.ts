@@ -87,6 +87,26 @@ test.group('kernel-faithful paths', (group) => {
     assert.equal(markerOf(join(direct.path, 'db.sqlite')), 'what-the-app-uses')
   })
 
+  test('configured padded filename identifies the file opened by better-sqlite3', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    markedDatabase(live, 'driver-file')
+    const handle = openDatabase(`${live} `, { fileMustExist: true, readonly: true })
+    try {
+      const main = (handle.pragma('database_list') as Array<{ name: string; file: string }>).find(
+        (entry) => entry.name === 'main'
+      )
+      assert.equal(main?.file, live)
+    } finally {
+      handle.close()
+    }
+    const source = resolveSqliteSource(lucid(`${live} `))
+    assert.equal(source, live)
+    const bundle = await createBundle(prepared({ livePath: source, directory: join(root, 'b') }))
+    assert.equal(markerOf(join(bundle.path, 'db.sqlite')), 'driver-file')
+  })
+
   test('P1: .. across two symlinked folders', async ({ assert }) => {
     mkdirSync(join(root, 'a', 'b'), { recursive: true })
     mkdirSync(join(root, 'c', 'd'), { recursive: true })

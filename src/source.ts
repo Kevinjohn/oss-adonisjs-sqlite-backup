@@ -7,6 +7,11 @@ import type { LucidDatabaseConfig } from './types.js'
 
 const SQLITE_CLIENTS = new Set(['better-sqlite3', 'sqlite3', 'sqlite'])
 
+/** Match better-sqlite3's constructor before interpreting a configured filename. */
+export function normalizeConfiguredSqliteFilename(filename: string, client: string): string {
+  return client === 'better-sqlite3' ? filename.trim() : filename
+}
+
 /** Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would. */
 export function resolveSqliteSource(
   database: LucidDatabaseConfig | undefined,
@@ -20,8 +25,12 @@ export function resolveSqliteSource(
   if (!SQLITE_CLIENTS.has(node.client)) {
     throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" uses ${node.client}`)
   }
-  const filename = (node.connection as { filename?: unknown } | undefined)?.filename
-  if (typeof filename !== 'string' || filename === '' || filename === ':memory:') {
+  const configuredFilename = (node.connection as { filename?: unknown } | undefined)?.filename
+  if (typeof configuredFilename !== 'string') {
+    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
+  }
+  const filename = normalizeConfiguredSqliteFilename(configuredFilename, node.client)
+  if (filename === '' || filename === ':memory:') {
     throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
   }
   if (/^file:/i.test(filename)) {
