@@ -19,7 +19,11 @@ import { verifyBundle } from '../src/bundles.js'
 import { openDatabase } from '../src/native.js'
 import { countItems, startChild, stopChild, tempRoot, within } from './helpers.js'
 
-async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = true) {
+async function bootApp(
+  root: string,
+  withBackupConfig: boolean | 'disabled' = true,
+  backupDirectory?: string
+) {
   const live = join(root, 'live.db')
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
@@ -39,7 +43,8 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
         ...(withBackupConfig
           ? {
               backup: defineConfig({
-                directory: withBackupConfig === 'disabled' ? '' : join(root, 'backups'),
+                directory:
+                  withBackupConfig === 'disabled' ? '' : (backupDirectory ?? join(root, 'backups')),
               }),
             }
           : {}),
@@ -59,6 +64,25 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
   await app.start(() => {})
   return { app, live }
 }
+
+test('refused implicit create leaves an unsafe root permission unchanged', async ({ assert }) => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root, true, root)
+  try {
+    openDatabase(live).close()
+    chmodSync(root, 0o755)
+    const before = statSync(root).mode & 0o777
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/E_BACKUP_UNSAFE/)
+    assert.equal(statSync(root).mode & 0o777, before)
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
 
 test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
   let root: string
