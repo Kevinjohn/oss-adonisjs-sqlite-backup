@@ -1,6 +1,7 @@
 import { prepared } from './helpers.js'
 /** Every publish step is fsynced in order: file, then its directory, before the next step. */
 import { test } from '@japa/runner'
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createBundle } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
@@ -72,6 +73,29 @@ test.group('durability', (group) => {
     prepareDirectory(directory)
     assert.isTrue(secondStarted)
     assert.deepEqual(events, ['sync ', 'sync nested', 'sync nested'])
+  })
+
+  test('preparing an existing file refuses it without changing its mode or bytes', ({ assert }) => {
+    const file = join(root, 'backup-root')
+    const bytes = Buffer.from('keep this file intact')
+    writeFileSync(file, bytes, { mode: 0o644 })
+    const beforeMode = statSync(file).mode & 0o777
+
+    assert.throws(() => prepareDirectory(file), /must be a private directory/)
+    assert.equal(statSync(file).mode & 0o777, beforeMode)
+    assert.deepEqual(readFileSync(file), bytes)
+  })
+
+  test('preparing existing permissive directories tightens their mode', ({ assert }) => {
+    for (const mode of [0o755, 0o777]) {
+      const directory = join(root, `mode-${mode.toString(8)}`)
+      mkdirSync(directory, { mode })
+      chmodSync(directory, mode)
+
+      prepareDirectory(directory)
+
+      assert.equal(statSync(directory).mode & 0o777, 0o700)
+    }
   })
 
   test('restore-prepare fsyncs the staged file and its directory', async ({ assert }) => {
