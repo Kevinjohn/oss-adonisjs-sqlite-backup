@@ -70,12 +70,21 @@ test.group('operatorDatabasePath', (group) => {
       ' ',
       join(root, 'missing.db'),
       join(root, 'directory.db'),
+      'file:memory.db',
     ]) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
         'Operator commands require an existing on-disk database'
       )
     }
+    assert.throws(
+      () =>
+        operatorDatabasePath(
+          configured({ ...sqlite(join(root, 'live.db')), connection: { filename: 7 } }),
+          true
+        ),
+      'Operator commands require an existing on-disk database'
+    )
   })
 })
 
@@ -95,6 +104,30 @@ function lucid(path: string, pool: Record<string, unknown> = {}) {
     logger as never,
     Object.assign(new EventEmitter(), { hasListeners: () => false }) as never
   )
+}
+
+function replica(db: Database) {
+  const manager = db.manager as unknown as {
+    add(name: string, config: unknown): void
+    closeAll(): Promise<void>
+    connections: Map<string, { connection?: unknown }>
+  }
+  manager.add('replica', {
+    client: 'pg',
+    connection: { host: '127.0.0.1', database: 'unused' },
+    replicas: {
+      write: { connection: { host: '127.0.0.1', database: 'unused' } },
+      read: { connection: [{ host: '127.0.0.1', database: 'unused' }] },
+    },
+  })
+  db.connection('replica')
+  const connection = manager.connections.get('replica')?.connection as {
+    client: { destroy(): Promise<void>; client: { pool: EventEmitter } }
+    readClient: { destroy(): Promise<void>; client: { pool: EventEmitter } }
+    ready: boolean
+    listenerCount(event: string): number
+  }
+  return { manager, connection }
 }
 
 test.group('withOperatorDatabase', (group) => {
@@ -262,11 +295,11 @@ test.group('withOperatorDatabase', (group) => {
       assert.fail('Expected the destroy failure')
     } catch (error) {
       assert.equal(error, failure)
+      assert.isFalse((handle as typeof handle & { open: boolean }).open)
     } finally {
       knex.destroy = original
       await original()
     }
-    assert.isFalse((handle as typeof handle & { open: boolean }).open)
   })
 
   test('does not replace a handle rejected by the configured validator', async ({ assert }) => {
@@ -341,6 +374,79 @@ test.group('withOperatorDatabase', (group) => {
     reopened.close()
   })
 
+  test('captures a secondary replica read shutdown rejection after write completion', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const { connection } = replica(db)
+    const read = connection.readClient
+    const write = connection.client
+    const readDestroy = read.destroy.bind(read)
+    const readDestroyProperty = Object.getOwnPropertyDescriptor(read, 'destroy')!
+    let writeCompleted = false
+    write.client.pool.on('poolDestroySuccess', () => {
+      writeCompleted = true
+    })
+    const sentinel = new Error('read destroy failed')
+    Object.defineProperty(read, 'destroy', {
+      configurable: true,
+      value: async () => {
+        throw sentinel
+      },
+    })
+    try {
+      await withOperatorDatabase(db, async () => 'done')
+      assert.fail('Expected read shutdown failure')
+    } catch (error) {
+      assert.equal(error, sentinel)
+      assert.isTrue(writeCompleted)
+      assert.isTrue(connection.ready)
+      assert.equal(connection.listenerCount('disconnect:error'), 0)
+    } finally {
+      Object.defineProperty(read, 'destroy', readDestroyProperty)
+      await readDestroy()
+    }
+  })
+
+  test('reports a secondary replica pool left alive by silent shutdown', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const { connection } = replica(db)
+    const read = connection.readClient
+    const readDestroy = read.destroy.bind(read)
+    const readDestroyProperty = Object.getOwnPropertyDescriptor(read, 'destroy')!
+    let writeCompleted = false
+    connection.client.client.pool.on('poolDestroySuccess', () => {
+      writeCompleted = true
+    })
+    Object.defineProperty(read, 'destroy', { configurable: true, value: async () => {} })
+    try {
+      await assert.rejects(() => withOperatorDatabase(db, async () => 'done'), /replica.*read/)
+      assert.isTrue(writeCompleted)
+      assert.isTrue(connection.ready)
+      assert.equal(connection.listenerCount('disconnect:error'), 0)
+    } finally {
+      Object.defineProperty(read, 'destroy', readDestroyProperty)
+      await readDestroy()
+    }
+  })
+
+  test('completes both secondary replica pools on success', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const { connection } = replica(db)
+    const completed: string[] = []
+    connection.client.client.pool.on('poolDestroySuccess', () => completed.push('write'))
+    connection.readClient.client.pool.on('poolDestroySuccess', () => completed.push('read'))
+    assert.equal(await withOperatorDatabase(db, async () => 'done'), 'done')
+    assert.deepEqual(completed, ['write', 'read'])
+    assert.equal(connection.listenerCount('disconnect:error'), 0)
+  })
+
   test('rejects a second operator while the first owns the lease', async ({ assert }) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
@@ -381,6 +487,132 @@ test.group('withOperatorDatabase', (group) => {
           assert.isTrue(owner.release(handle))
         }),
       /refused the handle release/
+    )
+  })
+
+  test('reports the real pool destroy failure and preserves an earlier work error', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const work = new Error('work failed')
+    const destroy = new Error('native destroy failed')
+    const knex = db.connection().getWriteClient().client as unknown as {
+      destroyRawConnection(handle: unknown): Promise<void>
+    }
+    const original = knex.destroyRawConnection.bind(knex)
+    let handle!: ReturnType<typeof openDatabase>
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        knex.destroyRawConnection = async () => {
+          throw destroy
+        }
+        throw work
+      })
+      assert.fail('Expected work and destroy failures')
+    } catch (error) {
+      assert.instanceOf(error, AggregateError)
+      assert.deepEqual((error as AggregateError).errors, [work, destroy])
+    } finally {
+      knex.destroyRawConnection = original
+    }
+    assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('closes an independently managed connection after first acquisition fails', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const { connection } = replica(db)
+    const knex = db.connection().getWriteClient().client as unknown as {
+      acquireConnection(): Promise<unknown>
+    }
+    const original = knex.acquireConnection.bind(knex)
+    const sentinel = new Error('first checkout failed')
+    knex.acquireConnection = async () => {
+      throw sentinel
+    }
+    try {
+      await withOperatorDatabase(db, async () => assert.fail('Callback entered'))
+      assert.fail('Expected first checkout failure')
+    } catch (error) {
+      assert.equal(error, sentinel)
+      assert.isFalse(connection.ready)
+    } finally {
+      knex.acquireConnection = original
+    }
+  })
+
+  test('preserves primary work failure before direct manager rejection', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const manager = db.manager as unknown as { closeAll(): Promise<void> }
+    const original = manager.closeAll.bind(manager)
+    const work = new Error('work failed')
+    const cleanup = new Error('manager failed')
+    manager.closeAll = async () => {
+      await original()
+      throw cleanup
+    }
+    try {
+      await withOperatorDatabase(db, async () => {
+        throw work
+      })
+      assert.fail('Expected both failures')
+    } catch (error) {
+      assert.instanceOf(error, AggregateError)
+      assert.deepEqual((error as AggregateError).errors, [work, cleanup])
+    } finally {
+      manager.closeAll = original
+    }
+  })
+
+  test('reports silent primary cleanup alongside work failure and closes the handle', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const manager = db.manager as unknown as { closeAll(): Promise<void> }
+    const original = manager.closeAll.bind(manager)
+    const work = new Error('work failed')
+    let handle!: ReturnType<typeof openDatabase>
+    manager.closeAll = async () => {}
+    try {
+      await withOperatorDatabase(db, async (borrowed) => {
+        handle = borrowed as typeof handle
+        throw work
+      })
+      assert.fail('Expected both failures')
+    } catch (error) {
+      assert.instanceOf(error, AggregateError)
+      const failures = (error as AggregateError).errors
+      assert.equal(failures[0], work)
+      assert.match((failures[1] as Error).message, /pool cleanup incomplete|handle remained open/)
+      assert.isFalse((handle as typeof handle & { open: boolean }).open)
+    } finally {
+      manager.closeAll = original
+      await original()
+    }
+  })
+
+  test('preserves non-contention setup errors', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live, {
+      afterCreate: (handle: ReturnType<typeof openDatabase>, done: () => void) => {
+        handle.exec('BEGIN')
+        done()
+      },
+    })
+    await assert.rejects(
+      () => withOperatorDatabase(db, async () => assert.fail('entered')),
+      /transaction/
     )
   })
 })

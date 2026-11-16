@@ -158,31 +158,80 @@ async function runOperatorDatabase<T>(
     }
   }
 
-  for (const entry of manager.connections?.values() ?? []) {
+  let primaryCleanupObserved = false
+  const captured: Array<{
+    name: string
+    pools: Array<{ pool: Pool; roles: string[]; completed: boolean }>
+    disconnectCount: number
+  }> = []
+  for (const [name, entry] of manager.connections ?? []) {
     const connection = entry.connection
     if (!connection) continue
-    const disconnect = (error: unknown) => errors.push(error)
+    const record = {
+      name,
+      pools: [] as Array<{ pool: Pool; roles: string[]; completed: boolean }>,
+      disconnectCount: 0,
+    }
+    captured.push(record)
+    const disconnect = (error: unknown) => {
+      errors.push(error)
+      record.disconnectCount++
+      if (name === db.primaryConnectionName) primaryCleanupObserved = true
+    }
     connection.on('disconnect:error', disconnect)
     listeners.push(() => connection.removeListener('disconnect:error', disconnect))
-    for (const pool of new Set([
-      connection.client?.client?.pool,
-      connection.readClient?.client?.pool,
-    ])) {
+    for (const [role, pool] of [
+      ['write', connection.client?.client?.pool],
+      ['read', connection.readClient?.client?.pool],
+    ] as const) {
       if (!pool) continue
-      const destroy = (_id: unknown, _resource: unknown, error: unknown) => errors.push(error)
+      const existing = record.pools.find((item) => item.pool === pool)
+      if (existing) {
+        existing.roles.push(role)
+        continue
+      }
+      const state = { pool, roles: [role], completed: false }
+      record.pools.push(state)
+      const destroy = (_id: unknown, _resource: unknown, error: unknown) => {
+        errors.push(error)
+        if (name === db.primaryConnectionName && pool === owner) primaryCleanupObserved = true
+      }
+      const complete = () => {
+        state.completed = true
+        connection.removeListener('disconnect:error', disconnect)
+        connection.on('disconnect:error', disconnect)
+      }
       pool.on('destroyFail', destroy)
+      pool.on('poolDestroySuccess', complete)
       listeners.push(() => pool.removeListener('destroyFail', destroy))
+      listeners.push(() => pool.removeListener('poolDestroySuccess', complete))
     }
   }
+  let managerFailed = false
   try {
     await manager.closeAll()
   } catch (error) {
+    managerFailed = true
+    primaryCleanupObserved = true
     errors.push(error)
   } finally {
     for (const remove of listeners) remove()
   }
+  if (!managerFailed) {
+    for (const record of captured) {
+      const pending = record.pools.filter((item) => !item.completed)
+      if (pending.length > record.disconnectCount) {
+        errors.push(
+          new Error(
+            `Operator connection ${record.name} pool cleanup incomplete: ${pending.flatMap((item) => item.roles).join(', ')}`
+          )
+        )
+        if (record.name === db.primaryConnectionName) primaryCleanupObserved = true
+      }
+    }
+  }
   if (handle?.open) {
-    if (errors.length === 0)
+    if (!primaryCleanupObserved)
       errors.push(new Error('Operator database handle remained open after pool cleanup'))
     try {
       handle.close()
