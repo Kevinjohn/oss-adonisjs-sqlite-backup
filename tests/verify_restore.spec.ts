@@ -218,7 +218,7 @@ test.group('verify and prepareRestore', (group) => {
     }
   })
 
-  test('prepareRestore is lock-free and reports a vanished bundle as not found', async ({
+  test('prepareRestore is lock-free and reports a damaged READY bundle as invalid', async ({
     assert,
   }) => {
     const lock = acquireLock(directory)
@@ -230,7 +230,7 @@ test.group('verify and prepareRestore', (group) => {
     rmSync(join(path, 'db.sqlite'))
     assert.equal(
       codeOf(() => prepareRestore({ directory, target: join(root, 'b.db'), livePath: live })),
-      'E_BACKUP_NOT_FOUND'
+      'E_BACKUP_INVALID'
     )
   })
 })
