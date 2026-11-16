@@ -1,10 +1,13 @@
 import { prepared } from './helpers.js'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles } from '../src/bundles.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { checkDatabase } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
+import { internalHooks } from '../src/internal_hooks.js'
 import { bundleName } from '../src/names.js'
 import { openDatabase } from '../src/native.js'
 import {
@@ -80,6 +83,138 @@ test.group('createBundle', (group) => {
       readdirSync(directory).filter((n) => n.startsWith('bak-')),
       []
     )
+  })
+
+  test('failed create unpublishes READY before a refused recursive cleanup', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    let readyWritten = false
+    internalHooks.durability = (event, path) => {
+      if (event === 'write' && path.endsWith('/READY')) readyWritten = true
+      if (readyWritten && event === 'sync' && path === directory)
+        throw new Error('post publication failure')
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /post publication failure/)
+      assert.match(
+        String((error as { cleanupError?: unknown }).cleanupError),
+        /recursive cleanup refused/
+      )
+      const bundles = readdirSync(directory).filter((name) => name.startsWith('bak-'))
+      assert.lengthOf(bundles, 1)
+      assert.isFalse(existsSync(join(directory, bundles[0], 'READY')))
+    } finally {
+      delete internalHooks.durability
+      delete internalHooks.step
+    }
+  })
+
+  test('source close failure preserves the create error and still releases the lock', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    let failedHandle: { name: string } | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        failedHandle = this
+        throw new Error('source close failed')
+      }
+      originalClose.call(this)
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('copy interrupted')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /copy interrupted/)
+      assert.match(
+        String((error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors?.[0]),
+        /source close failed/
+      )
+      acquireLock(directory).release()
+    } finally {
+      delete internalHooks.step
+      prototype.close = originalClose
+      if (failedHandle) originalClose.call(failedHandle)
+    }
+  })
+
+  test('native cleanup failures after READY leave no published recovery point', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    for (const failedPath of [live, join(directory, '.backup.lock')]) {
+      let failedHandle: { name: string } | undefined
+      prototype.close = function () {
+        if (this.name === failedPath) {
+          failedHandle = this
+          throw new Error('native close failed')
+        }
+        originalClose.call(this)
+      }
+      internalHooks.step = (step) => {
+        if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+      }
+      try {
+        const error = await createBundle({ livePath: live, directory }).catch(
+          (caught: unknown) => caught
+        )
+        assert.match(String(error), /native close failed/)
+        assert.match(
+          String((error as { cleanupError?: unknown }).cleanupError),
+          /recursive cleanup refused/
+        )
+        assert.deepEqual(listBundles(directory), [])
+        assert.throws(() => verifyBundle(directory), /no READY bundle/)
+      } finally {
+        delete internalHooks.step
+        prototype.close = originalClose
+        if (failedHandle) originalClose.call(failedHandle)
+      }
+    }
+  })
+
+  test('non-Error work and recursive cleanup failures both remain observable', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw null
+      if (step === 'create:cleanup') throw 0
+    }
+    try {
+      const failure = await createBundle(prepared({ livePath: live, directory })).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [null, 0])
+      assert.isTrue(Object.hasOwn(failure as object, 'cleanupError'))
+      assert.equal((failure as { cleanupError: unknown }).cleanupError, 0)
+    } finally {
+      delete internalHooks.step
+    }
   })
 
   test('checkDatabase reports page corruption', async ({ assert }) => {

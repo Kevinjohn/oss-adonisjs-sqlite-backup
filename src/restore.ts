@@ -5,7 +5,7 @@ import { assertDirectory } from './directory.js'
 import { BackupException } from './errors.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
-import { DATABASE } from './names.js'
+import { DATABASE, READY } from './names.js'
 import { realPath } from './paths.js'
 import { isWithin, normalizeConfiguredSqliteFilename } from './source.js'
 
@@ -69,11 +69,16 @@ export function prepareRestore(input: {
         cause,
       })
     }
-    // The bundle is still there, so the target side failed (permissions, read-only, disk full).
-    if (present(source)) throw cause
-    throw new BackupException('E_BACKUP_NOT_FOUND', `bundle ${bundle.name} cannot be read`, {
-      cause,
-    })
+    // Only a vanished publication is missing. A READY bundle with a missing database is damaged.
+    if (code === 'ENOENT' && !present(join(bundle.path, READY))) {
+      throw new BackupException('E_BACKUP_NOT_FOUND', `bundle ${bundle.name} was pruned`, { cause })
+    }
+    if (code === 'ENOENT' && !present(source)) {
+      throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} database is missing`, {
+        cause,
+      })
+    }
+    throw cause
   }
   // Where the copy landed, read at once: a folder on the way swapped for a symlink during the copy
   // moves it elsewhere, and may be swapped back before the checks below.
