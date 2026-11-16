@@ -190,6 +190,49 @@ test.group('Directory lock', () => {
     }
   })
 
+  test('failed acquisition attaches native close failure to the primary error', ({ assert }) => {
+    const { root, cleanup } = tempRoot()
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    const primary = new Error('exclusive lock failed')
+    const closeFailure = new Error('lock handle close failed')
+    let handle: { name: string } | undefined
+    prototype.exec = function (sql) {
+      if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') throw primary
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock')) {
+        handle = this
+        throw closeFailure
+      }
+      originalClose.call(this)
+    }
+    try {
+      let failure: (Error & { resourceCleanupErrors?: unknown[] }) | undefined
+      try {
+        acquireLock(root)
+        assert.fail('acquisition should throw')
+      } catch (error) {
+        failure = error as Error & { resourceCleanupErrors?: unknown[] }
+      }
+      assert.equal(failure, primary)
+      assert.deepEqual(failure!.resourceCleanupErrors, [closeFailure])
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        if (handle) originalClose.call(handle)
+      } finally {
+        cleanup()
+      }
+    }
+  })
+
   test('another process holding the lock blocks; its death releases it', async ({ assert }) => {
     const { root, cleanup } = tempRoot()
     const holder = await startChild('lock', root)

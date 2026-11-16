@@ -180,6 +180,80 @@ test.group('createBundle', (group) => {
     }
   })
 
+  test('keeps a non-Error copy failure with a source close failure', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    const closeFailure = new Error('source close failure')
+    let source: { name: string } | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        source = this
+        throw closeFailure
+      }
+      originalClose.call(this)
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw null
+    }
+    try {
+      const failure = await createBundle(prepared({ livePath: live, directory })).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [null, closeFailure])
+      assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
+        closeFailure,
+      ])
+      assert.deepEqual(listBundles(directory), [])
+    } finally {
+      delete internalHooks.step
+      prototype.close = originalClose
+      if (source) originalClose.call(source)
+    }
+  })
+
+  test('aggregates multiple native cleanup failures after a completed copy', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const lockPath = join(directory, '.backup.lock')
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    const sourceFailure = new Error('source close failure')
+    const lockFailure = new Error('lock close failure')
+    const handles: Array<{ name: string }> = []
+    prototype.close = function () {
+      if (this.name === live) {
+        handles.push(this)
+        throw sourceFailure
+      }
+      if (this.name === lockPath) {
+        handles.push(this)
+        throw lockFailure
+      }
+      originalClose.call(this)
+    }
+    try {
+      const failure = await createBundle({ livePath: live, directory }).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [sourceFailure, lockFailure])
+      assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
+        sourceFailure,
+        lockFailure,
+      ])
+      assert.deepEqual(listBundles(directory), [])
+    } finally {
+      prototype.close = originalClose
+      for (const handle of handles) originalClose.call(handle)
+    }
+  })
+
   test('native cleanup failures after READY leave no published recovery point', async ({
     assert,
   }) => {

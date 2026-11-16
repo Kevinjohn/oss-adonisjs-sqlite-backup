@@ -5,6 +5,7 @@ import { prepared } from './helpers.js'
  */
 import { test } from '@japa/runner'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -105,6 +106,25 @@ test.group('kernel-faithful paths', (group) => {
     assert.equal(source, live)
     const bundle = await createBundle(prepared({ livePath: source, directory: join(root, 'b') }))
     assert.equal(markerOf(join(bundle.path, 'db.sqlite')), 'driver-file')
+  })
+
+  test('realPath propagates permission errors while inspecting an existing directory', ({
+    assert,
+  }) => {
+    const denied = join(root, 'denied')
+    mkdirSync(denied)
+    chmodSync(denied, 0o000)
+    try {
+      let failure: NodeJS.ErrnoException | undefined
+      try {
+        realPath(join(denied, 'live.db'))
+      } catch (error) {
+        failure = error as NodeJS.ErrnoException
+      }
+      assert.equal(failure?.code, 'EACCES')
+    } finally {
+      chmodSync(denied, 0o700)
+    }
   })
 
   test('P1: .. across two symlinked folders', async ({ assert }) => {

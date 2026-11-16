@@ -421,6 +421,50 @@ test('command reports the original create failure and its cleanup failure', asyn
   }
 }).timeout(30_000)
 
+test('command reports every native error from failed lock acquisition', async () => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root)
+  const prototype = Database.prototype as {
+    exec: (this: { name: string }, sql: string) => unknown
+    close: (this: { name: string }) => void
+  }
+  const originalExec = prototype.exec
+  const originalClose = prototype.close
+  let lockHandle: { name: string } | undefined
+  prototype.exec = function (sql) {
+    if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') throw false
+    return originalExec.call(this, sql)
+  }
+  prototype.close = function () {
+    if (this.name.endsWith('/.backup.lock')) {
+      lockHandle = this
+      throw 0
+    }
+    originalClose.call(this)
+  }
+  try {
+    openDatabase(live).close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/backup native cleanup failed: false/)
+    command.assertLogMatches(/backup native cleanup failed: 0/)
+  } finally {
+    prototype.exec = originalExec
+    prototype.close = originalClose
+    try {
+      if (lockHandle) originalClose.call(lockHandle)
+    } finally {
+      try {
+        await app.terminate()
+      } finally {
+        cleanup()
+      }
+    }
+  }
+}).timeout(30_000)
+
 test('command reports rollback and close failures without hiding the create error', async () => {
   const { root, cleanup } = tempRoot()
   const { app, live } = await bootApp(root)
