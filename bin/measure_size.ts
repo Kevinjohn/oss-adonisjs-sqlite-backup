@@ -11,6 +11,7 @@ import {
   hasCleanupFailure,
   stopWriter,
   waitForSamplerPeak,
+  withClosedDatabase,
   withSampler,
   withWriter,
 } from './measure_size_support.js'
@@ -68,9 +69,11 @@ if (role === 'writer') {
     return { value, ms: Math.round(performance.now() - started) }
   }
   mkdirSync(root, { recursive: true })
+  let benchmarkFailed = false
+  let benchmarkError: unknown
   try {
     const seed = openDatabase(live)
-    try {
+    withClosedDatabase(seed, () => {
       seed.pragma('journal_mode = WAL')
       seed.exec('CREATE TABLE items (id INTEGER PRIMARY KEY, body TEXT)')
       const insert = seed.prepare('INSERT INTO items (body) VALUES (?)')
@@ -80,15 +83,12 @@ if (role === 'writer') {
         seed.exec('COMMIT')
       }
       seed.pragma('wal_checkpoint(TRUNCATE)')
-    } finally {
-      seed.close()
-    }
+    })
     console.log(`database: ${mb(statSync(live).size)} MB, 600000 rows`)
 
     for (const mode of ['wal', 'delete']) {
       const set = openDatabase(live)
-      set.pragma(`journal_mode = ${mode}`)
-      set.close()
+      withClosedDatabase(set, () => set.pragma(`journal_mode = ${mode}`))
       const writer = fork(new URL(import.meta.url), ['writer', live], {
         execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
       })
@@ -123,8 +123,23 @@ if (role === 'writer') {
         throw error
       }
     }
-  } finally {
+  } catch (error) {
+    benchmarkFailed = true
+    benchmarkError = error
+  }
+
+  try {
     if (removeRoot) rmSync(root, { recursive: true, force: true })
     else console.error(`kept benchmark directory because a worker may still be active: ${root}`)
+  } catch (cleanupError) {
+    if (benchmarkFailed) {
+      throw new AggregateError(
+        [benchmarkError, cleanupError],
+        'Benchmark and temporary directory cleanup failed'
+      )
+    }
+    throw cleanupError
   }
+
+  if (benchmarkFailed) throw benchmarkError
 }
