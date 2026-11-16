@@ -11,16 +11,16 @@ As a host operator, I want to guard a custom Ace command with `operatorDatabaseP
 
 ## Acceptance criteria
 
-| Argument               | Control          | Required/default/conditions                                                                        |
-| ---------------------- | ---------------- | -------------------------------------------------------------------------------------------------- |
-| `db`                   | Lucid `Database` | Required; the primary connection is checked                                                        |
-| `confirmServerStopped` | Boolean          | Required; `false` refuses with `Refusing without --confirm-server-stopped`                         |
-| `run(connection)`      | Async callback   | Required for `withOperatorDatabase`; receives the pool's only handle, which Lucid queries also use |
+| Argument               | Control          | Required/default/conditions                                                                                        |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `db`                   | Lucid `Database` | Required; the primary connection is checked                                                                        |
+| `confirmServerStopped` | Boolean          | Required; `false` refuses with `Refusing without --confirm-server-stopped`                                         |
+| `run(connection)`      | Async callback   | Required for `withOperatorDatabase`; receives the primary pool's only handle, which primary Lucid queries also use |
 
 - `operatorDatabasePath` is called before any connection is opened. It refuses a connection that is not `better-sqlite3` with `pool.max` of 1, an in-memory database, and a path that is not an existing regular file; it returns the file path.
-- `withOperatorDatabase` sets `busy_timeout = 0` and `locking_mode = EXCLUSIVE` on the only handle and takes the lock with `BEGIN EXCLUSIVE; COMMIT`. Only genuine lock contention gets the stopped-server advice; other setup errors retain their meaning. The original native lease remains checked out throughout `run`, including when the owning pool reaps idle connections or its connection lifetime expires. Ordinary Lucid queries and transactions borrow that handle in sequence. The callback finishes its transactions and leaves the handle open.
+- `withOperatorDatabase` sets `busy_timeout = 0` and `locking_mode = EXCLUSIVE` on the primary handle and takes the lock with `BEGIN EXCLUSIVE; COMMIT`. Only `SQLITE_BUSY` lock contention gets the stopped-server advice; other setup errors retain their meaning. The original native lease remains checked out throughout `run`, including when the owning pool reaps idle connections or its connection lifetime expires. Ordinary Lucid queries and transactions on the primary connection borrow that handle in sequence. The callback finishes its transactions and leaves the handle open. An overlapping call on the same `Database` is refused before taking cleanup ownership.
 - The helpers do not detect a running server; stopping it is the operator's responsibility, confirmed through `confirmServerStopped`.
-- `db.manager.closeAll()` is attempted after success and after every failure. Refused owner release and Lucid or Tarn cleanup events are reported even when their cleanup promises resolve. A cleanup failure is reported alone when work succeeded, otherwise in an `AggregateError` carrying the first failure and cleanup failures in order.
+- `db.manager.closeAll()` is attempted after success and after every failure after ownership begins; overlapping calls are refused earlier. Refused owner release and Lucid or Tarn cleanup events are reported even when their cleanup promises resolve. A cleanup failure is reported alone when work succeeded, otherwise in an `AggregateError` carrying the first failure and cleanup failures in order.
 
 ## User flow
 
@@ -49,11 +49,13 @@ flowchart TD
     D --> S["busy_timeout 0; locking_mode EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT"]
     S -->|PRAGMA fails| P["Record that error as the lock failure"]
     S -->|BUSY| Q["Record contention advice"]
+    S -->|Other BEGIN failure| R["Record original setup error"]
     S -->|Succeeds| H["Run callback with serialized Lucid loans of the pinned handle"]
     P --> I
     Q --> I
+    R --> I
     H --> I
-    I["Drain loans; release original lease; close all managed connections"]
+    I["Drain loans; release original lease; attempt to close all managed connections"]
     I --> J{"Earlier failure or cleanup failure?"}
     J -->|Both| K["Throw AggregateError"]
     J -->|One| L["Throw it"]
