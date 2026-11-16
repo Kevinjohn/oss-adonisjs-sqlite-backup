@@ -85,6 +85,10 @@ with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
 
 ## Upgrading a database
 
+The install command above installs v0.2.0. The upgrade-policy forwarding described below is
+unreleased and is not included in that archive; it will apply only after a release that contains
+the change.
+
 `node ace db:upgrade` takes a verified snapshot of the primary connection's database, then runs
 `migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.
 
