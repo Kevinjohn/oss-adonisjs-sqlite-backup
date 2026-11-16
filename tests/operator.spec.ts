@@ -31,6 +31,7 @@ test.group('operatorDatabasePath', (group) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
     assert.equal(operatorDatabasePath(configured(sqlite(live)), true), live)
+    assert.equal(operatorDatabasePath(configured(sqlite(` ${live} `)), true), live)
   })
 
   test('refuses without the operator confirmation, before reading any configuration', ({
@@ -61,7 +62,13 @@ test.group('operatorDatabasePath', (group) => {
 
   test('refuses an in-memory, missing or non-file database', ({ assert }) => {
     mkdirSync(join(root, 'directory.db'))
-    for (const filename of [':memory:', join(root, 'missing.db'), join(root, 'directory.db')]) {
+    for (const filename of [
+      ':memory:',
+      ' :memory: ',
+      ' ',
+      join(root, 'missing.db'),
+      join(root, 'directory.db'),
+    ]) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
         'Operator commands require an existing on-disk database'
