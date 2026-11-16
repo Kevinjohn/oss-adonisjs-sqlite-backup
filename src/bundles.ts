@@ -193,6 +193,27 @@ export async function createBundle(
   let failed = false
   let result: CreateResult | undefined
   const cleanupErrors: unknown[] = []
+  const cleanupFailedBundle = (error: unknown): unknown => {
+    if (!bundlePath) return error
+    try {
+      const marker = join(bundlePath, READY)
+      if (existsSync(marker)) {
+        unlinkSync(marker)
+        syncPath(bundlePath)
+      }
+      internalHooks.step?.('create:cleanup', bundlePath)
+      rmSync(bundlePath, { recursive: true, force: true })
+    } catch (cleanupError) {
+      if (error instanceof Error) {
+        Object.defineProperty(error, 'cleanupError', { value: cleanupError })
+      } else {
+        const combined = new AggregateError([error, cleanupError], 'bundle cleanup failed')
+        Object.defineProperty(combined, 'cleanupError', { value: cleanupError })
+        return combined
+      }
+    }
+    return error
+  }
   try {
     let journalMode: string
     try {
@@ -301,21 +322,7 @@ export async function createBundle(
     result = { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
   } catch (error) {
     failed = true
-    primaryError = error
-    if (bundlePath) {
-      try {
-        const marker = join(bundlePath, READY)
-        if (existsSync(marker)) {
-          unlinkSync(marker)
-          syncPath(bundlePath)
-        }
-        internalHooks.step?.('create:cleanup', bundlePath)
-        rmSync(bundlePath, { recursive: true, force: true })
-      } catch (cleanupError) {
-        if (error instanceof Error)
-          Object.defineProperty(error, 'cleanupError', { value: cleanupError })
-      }
-    }
+    primaryError = cleanupFailedBundle(error)
   } finally {
     try {
       if (!borrowed) source?.close()
@@ -332,17 +339,25 @@ export async function createBundle(
     if (cleanupErrors.length) {
       if (primaryError instanceof Error)
         Object.defineProperty(primaryError, 'resourceCleanupErrors', { value: cleanupErrors })
-      else
-        throw new AggregateError(
+      else {
+        const combined = new AggregateError(
           [primaryError, ...cleanupErrors],
           'bundle creation and cleanup failed'
         )
+        Object.defineProperty(combined, 'resourceCleanupErrors', { value: cleanupErrors })
+        throw combined
+      }
     }
     throw primaryError
   }
-  if (cleanupErrors.length)
-    throw cleanupErrors.length === 1
-      ? cleanupErrors[0]
-      : new AggregateError(cleanupErrors, 'native resource cleanup failed')
+  if (cleanupErrors.length) {
+    const failure =
+      cleanupErrors.length === 1
+        ? cleanupErrors[0]
+        : new AggregateError(cleanupErrors, 'native resource cleanup failed')
+    if (failure instanceof AggregateError)
+      Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
+    throw cleanupFailedBundle(failure)
+  }
   return result!
 }

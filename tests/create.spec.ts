@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles } from '../src/bundles.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { checkDatabase } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
@@ -151,6 +151,69 @@ test.group('createBundle', (group) => {
       delete internalHooks.step
       prototype.close = originalClose
       if (failedHandle) originalClose.call(failedHandle)
+    }
+  })
+
+  test('native cleanup failures after READY leave no published recovery point', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    for (const failedPath of [live, join(directory, '.backup.lock')]) {
+      let failedHandle: { name: string } | undefined
+      prototype.close = function () {
+        if (this.name === failedPath) {
+          failedHandle = this
+          throw new Error('native close failed')
+        }
+        originalClose.call(this)
+      }
+      internalHooks.step = (step) => {
+        if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+      }
+      try {
+        const error = await createBundle({ livePath: live, directory }).catch(
+          (caught: unknown) => caught
+        )
+        assert.match(String(error), /native close failed/)
+        assert.match(
+          String((error as { cleanupError?: unknown }).cleanupError),
+          /recursive cleanup refused/
+        )
+        assert.deepEqual(listBundles(directory), [])
+        assert.throws(() => verifyBundle(directory), /no READY bundle/)
+      } finally {
+        delete internalHooks.step
+        prototype.close = originalClose
+        if (failedHandle) originalClose.call(failedHandle)
+      }
+    }
+  })
+
+  test('non-Error work and recursive cleanup failures both remain observable', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw null
+      if (step === 'create:cleanup') throw 0
+    }
+    try {
+      const failure = await createBundle(prepared({ livePath: live, directory })).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [null, 0])
+      assert.isTrue(Object.hasOwn(failure as object, 'cleanupError'))
+      assert.equal((failure as { cleanupError: unknown }).cleanupError, 0)
+    } finally {
+      delete internalHooks.step
     }
   })
 

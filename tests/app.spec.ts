@@ -479,3 +479,30 @@ test('command reports rollback and close failures without hiding the create erro
     }
   }
 }).timeout(30_000)
+
+test('command reports a falsy temporary cleanup failure', async () => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root)
+  try {
+    const db = openDatabase(live)
+    db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+    db.close()
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('original copy failure')
+      if (step === 'create:cleanup') throw 0
+    }
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/original copy failure/)
+    command.assertLogMatches(/backup temp cleanup failed: 0/)
+  } finally {
+    delete internalHooks.step
+    try {
+      await app.terminate()
+    } finally {
+      cleanup()
+    }
+  }
+}).timeout(30_000)
