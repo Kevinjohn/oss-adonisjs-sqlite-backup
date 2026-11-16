@@ -233,6 +233,88 @@ test.group('Directory lock', () => {
     }
   })
 
+  test('async acquisition preserves a busy error when contender close fails', async ({
+    assert,
+  }) => {
+    const { root, cleanup } = tempRoot()
+    const holder = acquireLock(root)
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    const closeError = new Error('contender close failed')
+    let primaryError: Error | undefined
+    let failedHandle: { name: string } | undefined
+    let signalCloseAttempt!: () => void
+    const closeAttempted = new Promise<void>((resolve) => {
+      signalCloseAttempt = resolve
+    })
+
+    prototype.exec = function (sql) {
+      try {
+        return originalExec.call(this, sql)
+      } catch (error) {
+        if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') {
+          primaryError = error as Error
+        }
+        throw error
+      }
+    }
+    prototype.close = function () {
+      if (this.name.endsWith('/.backup.lock') && !failedHandle) {
+        failedHandle = this
+        signalCloseAttempt()
+        throw closeError
+      }
+      originalClose.call(this)
+    }
+
+    let holderReleased = false
+    let acquiredLock: ReturnType<typeof acquireLock> | undefined
+    try {
+      const acquisition = acquireCreateLock(root, 5_000).then(
+        (lock) => {
+          acquiredLock = lock
+          return { lock } as const
+        },
+        (error: unknown) => ({ error }) as const
+      )
+
+      await closeAttempted
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      holder.release()
+      holderReleased = true
+
+      const result = await acquisition
+      assert.isUndefined('lock' in result ? result.lock : undefined)
+      assert.strictEqual('error' in result ? result.error : undefined, primaryError)
+      assert.equal((primaryError as Error & { code?: string }).code, 'SQLITE_BUSY')
+      assert.deepEqual(
+        (primaryError as Error & { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors,
+        [closeError]
+      )
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      try {
+        if (!holderReleased) holder.release()
+      } finally {
+        try {
+          acquiredLock?.release()
+        } finally {
+          try {
+            if (failedHandle) originalClose.call(failedHandle)
+          } finally {
+            cleanup()
+          }
+        }
+      }
+    }
+  }).timeout(20_000)
+
   test('another process holding the lock blocks; its death releases it', async ({ assert }) => {
     const { root, cleanup } = tempRoot()
     const holder = await startChild('lock', root)
