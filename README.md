@@ -60,11 +60,10 @@ handles it opens. The service also accepts `backup.create({ database })`.
 
 Standalone callers can also import `acquireLock(directory, timeoutMs)` to coordinate their own
 work with package backup operations. The caller must provide an existing private directory on a
-local filesystem, with the directory and its ancestors writable only by trusted users, and use its
-canonical path rather than a symlink alias. The direct function does not check root privacy. Keep
-the returned lock object referenced until `release()`. The `.backup.lock` file contains no
-application data; do not create hard-link aliases to it, because repair of a damaged lock can
-truncate the underlying file.
+local filesystem and keep its ancestors writable only by trusted users or sticky, as described
+under Limits. The direct function does not check root privacy. Keep the returned lock object
+referenced until `release()`. The `.backup.lock` file contains no application data. Damaged-lock
+repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
