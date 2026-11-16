@@ -132,6 +132,11 @@ lies inside the backup folder. It stops at a verified copy. Switching the app to
 app, point the Lucid connection at the staged file (or move it into place), start the app and
 check it. Keep the old file until you are satisfied.
 
+If the process is interrupted after the copy creates the target but before `restore-prepare`
+returns, the target may remain incomplete or unverified. Its existence does not show that
+verification finished. Inspect and remove only that chosen target before retrying; the retry
+refuses an existing target. The bundle remains the recovery source.
+
 ## Errors
 
 Expected failures are a `BackupException` with one of six codes: `E_BACKUP_LOCKED`,
