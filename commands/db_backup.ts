@@ -101,12 +101,21 @@ export default class DbBackup extends BaseCommand {
       }
     } catch (error) {
       const code = error instanceof BackupException ? `${error.code}: ` : ''
-      this.logger.error(`db:backup ${this.action} failed: ${code}${(error as Error).message}`)
-      const cleanupError = (error as { cleanupError?: unknown }).cleanupError
-      if (cleanupError) this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+      const cleanupError =
+        error !== null && typeof error === 'object'
+          ? (error as { cleanupError?: unknown }).cleanupError
+          : undefined
+      if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
+        this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
       const resourceErrors =
-        (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors ??
-        (error instanceof AggregateError ? error.errors : [])
+        (error !== null && typeof error === 'object'
+          ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+          : undefined) ??
+        (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError')
+          ? error.errors
+          : [])
       for (const resourceError of resourceErrors) {
         this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
         const nestedErrors =

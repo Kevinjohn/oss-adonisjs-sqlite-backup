@@ -26,8 +26,11 @@ function tryLock(path: string, timeoutMs: number): NativeDatabase {
     try {
       handle.close()
     } catch (closeError) {
-      if (error instanceof Error)
+      if (error instanceof Error) {
         Object.defineProperty(error, 'resourceCleanupErrors', { value: [closeError] })
+      } else {
+        throw new AggregateError([error, closeError], 'lock acquisition and close failed')
+      }
     }
     throw error
   }
@@ -90,27 +93,31 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     release() {
       if (released) return
       let rollbackError: unknown
+      let rollbackFailed = false
       try {
         handle.exec('ROLLBACK')
       } catch (error) {
         rollbackError = error
+        rollbackFailed = true
       }
       let closeError: unknown
+      let closeFailed = false
       try {
         handle.close()
         released = true
       } catch (error) {
         closeError = error
+        closeFailed = true
       }
-      if (rollbackError && closeError) {
+      if (rollbackFailed && closeFailed) {
         if (rollbackError instanceof Error) {
           Object.defineProperty(rollbackError, 'resourceCleanupErrors', { value: [closeError] })
           throw rollbackError
         }
         throw new AggregateError([rollbackError, closeError], 'lock release failed')
       }
-      if (rollbackError) throw rollbackError
-      if (closeError) throw closeError
+      if (rollbackFailed) throw rollbackError
+      if (closeFailed) throw closeError
     },
   }
 }
