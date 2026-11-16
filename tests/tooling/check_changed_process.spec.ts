@@ -210,3 +210,119 @@ require('node:module').syncBuiltinESMExports()
   assert.match(result.text, /LOCAL_HANDLE_RELEASED/)
   assert.equal(await readFile(f.log, 'utf8'), '')
 }).timeout(10_000)
+
+test('deadline settles a never-closing owned child with timeout diagnostics', async ({
+  cleanup,
+}) => {
+  const f = await fixture()
+  cleanup(() => rm(f.directory, { recursive: true, force: true }))
+  const hook = path.join(f.directory, 'deadline-hook.cjs')
+  await writeFile(
+    hook,
+    `
+const cp = require('node:child_process')
+const { EventEmitter } = require('node:events')
+const { PassThrough } = require('node:stream')
+const realSetTimeout = global.setTimeout
+global.setTimeout = (callback, delay, ...args) => {
+ if (delay === 900000) { setImmediate(callback); return realSetTimeout(() => {}, 0) }
+ return realSetTimeout(callback, delay, ...args)
+}
+cp.spawn = () => {
+ const child = new EventEmitter(); child.pid = 99999999; child.exitCode = child.signalCode = null
+ child.stdout = new PassThrough(); child.stderr = new PassThrough()
+ const liveHandle = setInterval(() => {}, 1000)
+ child.unref = () => { clearInterval(liveHandle); console.log('LOCAL_HANDLE_RELEASED') }
+ setImmediate(() => child.stdout.write('partial timeout output'))
+ return child
+}
+process.kill = () => true
+let clock = 0; Date.now = () => (clock += 6000)
+require('node:module').syncBuiltinESMExports()
+`
+  )
+  f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
+  const child = launch(f)
+  const output = await outputOf(child)
+  const result = await collectExit(child, output)
+  assert.equal(result.code, 1, result.text)
+  assert.match(result.text, /stopped after 15 minutes/)
+  assert.match(result.text, /did not exit after SIGKILL/)
+  assert.match(result.text, /LOCAL_HANDLE_RELEASED/)
+  assert.equal(await readFile(f.log, 'utf8'), '')
+}).timeout(10_000)
+
+test('a stale deadline cannot signal a later child', async ({ cleanup }) => {
+  const f = await fixture()
+  cleanup(() => rm(f.directory, { recursive: true, force: true }))
+  const hook = path.join(f.directory, 'stale-deadline-hook.cjs')
+  await writeFile(
+    hook,
+    `
+const cp = require('node:child_process')
+const { EventEmitter } = require('node:events')
+const { PassThrough } = require('node:stream')
+const realSetTimeout = global.setTimeout
+let firstDeadline
+global.setTimeout = (callback, delay, ...args) => {
+ if (delay === 900000) { if (!firstDeadline) firstDeadline = callback; return realSetTimeout(() => {}, 0) }
+ return realSetTimeout(callback, delay, ...args)
+}
+let count = 0
+cp.spawn = () => {
+ const child = new EventEmitter(); child.pid = 99999999 + ++count
+ child.exitCode = child.signalCode = null
+ child.stdout = new PassThrough(); child.stderr = new PassThrough()
+ setImmediate(() => {
+   if (count === 2) firstDeadline()
+   child.stdout.end('finished')
+   child.stderr.end()
+   child.emit('close', 0, null)
+ })
+ return child
+}
+process.kill = () => { throw new Error('stale deadline signalled a child') }
+require('node:module').syncBuiltinESMExports()
+`
+  )
+  f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
+  const child = launch(f)
+  const output = await outputOf(child)
+  const result = await collectExit(child, output)
+  assert.equal(result.code, 0, result.text)
+  assert.match(result.text, /pass lint/)
+  assert.doesNotMatch(result.text, /stale deadline signalled/)
+}).timeout(10_000)
+
+test('failed step retains only a bounded tail of captured output', async ({ cleanup }) => {
+  const f = await fixture()
+  cleanup(() => rm(f.directory, { recursive: true, force: true }))
+  const hook = path.join(f.directory, 'large-output-hook.cjs')
+  await writeFile(
+    hook,
+    `
+const cp = require('node:child_process')
+const { EventEmitter } = require('node:events')
+const { PassThrough } = require('node:stream')
+cp.spawn = () => {
+ const child = new EventEmitter(); child.pid = 99999999
+ child.exitCode = child.signalCode = null
+ child.stdout = new PassThrough(); child.stderr = new PassThrough()
+ setImmediate(() => {
+   child.stdout.end('x'.repeat(1024 * 1024) + 'TAIL_MARKER')
+   child.stderr.end()
+   child.emit('close', 1, null)
+ })
+ return child
+}
+require('node:module').syncBuiltinESMExports()
+`
+  )
+  f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
+  const child = launch(f)
+  const output = await outputOf(child)
+  const result = await collectExit(child, output)
+  assert.equal(result.code, 1, result.text)
+  assert.match(result.text, /TAIL_MARKER/)
+  assert.ok(result.text.length < 210 * 1024, `captured ${result.text.length} characters`)
+}).timeout(10_000)
