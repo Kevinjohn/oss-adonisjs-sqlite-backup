@@ -1,6 +1,7 @@
 import { existsSync, lstatSync } from 'node:fs'
 import type { Database } from '@adonisjs/lucid/database'
 import type { NativeDatabase } from './native.js'
+import { normalizeConfiguredSqliteFilename } from './source.js'
 
 /**
  * Checks that a stopped-server operator command may open the primary connection, and returns the
@@ -15,68 +16,238 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
   if (config?.client !== 'better-sqlite3' || config.pool?.max !== 1) {
     throw new Error('Operator commands require the configured single-connection SQLite pool')
   }
-  const path = (config.connection as { filename: string }).filename
-  if (path === ':memory:' || !existsSync(path) || !lstatSync(path).isFile()) {
+  const configuredFilename = (config.connection as { filename?: unknown } | undefined)?.filename
+  const path =
+    typeof configuredFilename === 'string'
+      ? normalizeConfiguredSqliteFilename(configuredFilename, config.client)
+      : ''
+  if (
+    !path ||
+    path === ':memory:' ||
+    /^file:/i.test(path) ||
+    !existsSync(path) ||
+    !lstatSync(path).isFile()
+  ) {
     throw new Error('Operator commands require an existing on-disk database')
   }
   return path
 }
 
+type Handle = NativeDatabase & { open: boolean; __knex__disposed?: boolean }
+type Pool = {
+  constructor: new (options: Record<string, unknown>) => Pool
+  acquireTimeoutMillis: number
+  release(handle: Handle): boolean
+  destroy(): Promise<unknown>
+  on(event: string, listener: (...args: unknown[]) => void): void
+  removeListener(event: string, listener: (...args: unknown[]) => void): void
+}
+type Client = {
+  pool: Pool
+  config: { pool?: { validate?: (handle: Handle) => boolean | Promise<boolean> } }
+  acquireConnection(): Promise<Handle>
+}
+type Managed = {
+  on(event: string, listener: (...args: unknown[]) => void): void
+  removeListener(event: string, listener: (...args: unknown[]) => void): void
+  client?: { client?: { pool?: Pool } }
+  readClient?: { client?: { pool?: Pool } }
+}
+
+const activeOperators = new WeakSet<Database>()
+
 /**
- * Runs `run` while the pool's only handle holds the database in EXCLUSIVE locking mode, so no
- * other process can open it, then closes every connection. Lucid queries inside `run` use that
- * same handle. The pool is closed on success and on every failure.
- * @throws Error `Another process holds this database; stop the server and retry` when another
- *   process has the file open.
- * @throws AggregateError when a cleanup step also fails, holding the first failure and the
- *   cleanup failure in order.
+ * Run on the primary connection's pinned native handle, then attempt to close all managed Lucid
+ * connections. The callback must finish its transactions and leave the borrowed handle open.
+ * Concurrent calls on the same Database are refused before cleanup ownership is taken.
+ * Only SQLITE_BUSY during exclusive-lock acquisition receives stopped-server advice; other
+ * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
+ * both fail, AggregateError contains the work failure first and cleanup failures in observation
+ * order.
  */
 export async function withOperatorDatabase<T>(
   db: Database,
   run: (connection: NativeDatabase) => Promise<T>
 ): Promise<T> {
-  let failure: unknown
-  let failed = false
-  let result!: T
+  if (activeOperators.has(db)) throw new Error('An operator command is already using this database')
+  activeOperators.add(db)
   try {
-    const client = db.connection().getWriteClient().client
-    const connection = await client.acquireConnection()
-    let lockFailure: Error | undefined
+    return await runOperatorDatabase(db, run)
+  } finally {
+    activeOperators.delete(db)
+  }
+}
+
+async function runOperatorDatabase<T>(
+  db: Database,
+  run: (connection: NativeDatabase) => Promise<T>
+): Promise<T> {
+  const errors: unknown[] = []
+  let result!: T
+  let handle: Handle | undefined
+  let client: Client | undefined
+  let owner: Pool | undefined
+  let loan: Pool | undefined
+  const listeners: Array<() => void> = []
+  const manager = db.manager as unknown as {
+    connections?: Map<string, { connection?: Managed }>
+    closeAll(): Promise<void>
+  }
+  try {
+    client = db.connection().getWriteClient().client as unknown as Client
+    owner = client.pool
+    if (!owner) throw new Error('Operator command requires an initialized SQLite pool')
+    handle = await client.acquireConnection()
+    handle.pragma('busy_timeout = 0')
+    handle.pragma('locking_mode = EXCLUSIVE')
     try {
-      connection.pragma('busy_timeout = 0')
-      connection.pragma('locking_mode = EXCLUSIVE')
-      try {
-        connection.exec('BEGIN EXCLUSIVE; COMMIT')
-      } catch (cause) {
+      handle.exec('BEGIN EXCLUSIVE; COMMIT')
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /^SQLITE_BUSY(?:_|$)/.test((error as Error & { code?: string }).code ?? '')
+      ) {
         throw new Error('Another process holds this database; stop the server and retry', {
-          cause,
+          cause: error,
         })
       }
-    } catch (error) {
-      lockFailure =
-        error instanceof Error ? error : new Error('Operator lock failed', { cause: error })
+      throw error
     }
-    try {
-      await client.releaseConnection(connection)
-    } catch (cleanup) {
-      if (lockFailure !== undefined) {
-        throw new AggregateError([lockFailure, cleanup], 'Operator lock release failed')
-      }
-      throw cleanup
-    }
-    if (lockFailure !== undefined) throw lockFailure
-    result = await run(connection as NativeDatabase)
+
+    const pinned = handle
+    let created = false
+    let validationFailure: Error | undefined
+    const validate = client.config.pool?.validate
+    loan = new owner.constructor({
+      min: 1,
+      max: 1,
+      acquireTimeoutMillis: owner.acquireTimeoutMillis,
+      propagateCreateError: true,
+      create: async () => {
+        if (created)
+          throw validationFailure ?? new Error('Operator database handle is no longer available')
+        created = true
+        return pinned
+      },
+      destroy: async () => {},
+      validate: async (candidate: Handle) => {
+        if (candidate !== pinned || !candidate.open || candidate.__knex__disposed) return false
+        if (!validate) return true
+        try {
+          return await validate(candidate)
+        } catch (error) {
+          validationFailure = new Error('Operator database handle is no longer available', {
+            cause: error,
+          })
+          return false
+        }
+      },
+    })
+    client.pool = loan
+    result = await run(pinned)
   } catch (error) {
-    failure = error
-    failed = true
+    errors.push(error)
   }
-  // Closing the sole handle releases EXCLUSIVE mode even after acquisition or lock failure.
+
+  if (loan && client && owner) {
+    try {
+      await loan.destroy()
+    } catch (error) {
+      errors.push(error)
+    }
+    client.pool = owner
+  }
+  if (handle && owner) {
+    try {
+      if (!owner.release(handle))
+        errors.push(new Error('Operator database owner refused the handle release'))
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+
+  let primaryCleanupObserved = false
+  const captured: Array<{
+    name: string
+    pools: Array<{ pool: Pool; roles: string[]; completed: boolean }>
+    disconnectCount: number
+  }> = []
+  for (const [name, entry] of manager.connections ?? []) {
+    const connection = entry.connection
+    if (!connection) continue
+    const record = {
+      name,
+      pools: [] as Array<{ pool: Pool; roles: string[]; completed: boolean }>,
+      disconnectCount: 0,
+    }
+    captured.push(record)
+    const disconnect = (error: unknown) => {
+      errors.push(error)
+      record.disconnectCount++
+      if (name === db.primaryConnectionName) primaryCleanupObserved = true
+    }
+    connection.on('disconnect:error', disconnect)
+    listeners.push(() => connection.removeListener('disconnect:error', disconnect))
+    for (const [role, pool] of [
+      ['write', connection.client?.client?.pool],
+      ['read', connection.readClient?.client?.pool],
+    ] as const) {
+      if (!pool) continue
+      const existing = record.pools.find((item) => item.pool === pool)
+      if (existing) {
+        existing.roles.push(role)
+        continue
+      }
+      const state = { pool, roles: [role], completed: false }
+      record.pools.push(state)
+      const destroy = (_id: unknown, _resource: unknown, error: unknown) => {
+        errors.push(error)
+        if (name === db.primaryConnectionName && pool === owner) primaryCleanupObserved = true
+      }
+      const complete = () => {
+        state.completed = true
+        connection.removeListener('disconnect:error', disconnect)
+        connection.on('disconnect:error', disconnect)
+      }
+      pool.on('destroyFail', destroy)
+      pool.on('poolDestroySuccess', complete)
+      listeners.push(() => pool.removeListener('destroyFail', destroy))
+      listeners.push(() => pool.removeListener('poolDestroySuccess', complete))
+    }
+  }
+  let managerFailed = false
   try {
-    await db.manager.closeAll()
-  } catch (cleanup) {
-    if (failed) throw new AggregateError([failure, cleanup], 'Operator database cleanup failed')
-    throw cleanup
+    await manager.closeAll()
+  } catch (error) {
+    managerFailed = true
+    primaryCleanupObserved = true
+    errors.push(error)
+  } finally {
+    for (const remove of listeners) remove()
   }
-  if (failed) throw failure
+  if (!managerFailed) {
+    for (const record of captured) {
+      const pending = record.pools.filter((item) => !item.completed)
+      if (pending.length > record.disconnectCount) {
+        errors.push(
+          new Error(
+            `Operator connection ${record.name} pool cleanup incomplete: ${pending.flatMap((item) => item.roles).join(', ')}`
+          )
+        )
+        if (record.name === db.primaryConnectionName) primaryCleanupObserved = true
+      }
+    }
+  }
+  if (handle?.open) {
+    if (!primaryCleanupObserved)
+      errors.push(new Error('Operator database handle remained open after pool cleanup'))
+    try {
+      handle.close()
+    } catch (error) {
+      errors.push(error)
+    }
+  }
+  if (errors.length > 1) throw new AggregateError(errors, 'Operator database cleanup failed')
+  if (errors.length === 1) throw errors[0]
   return result
 }

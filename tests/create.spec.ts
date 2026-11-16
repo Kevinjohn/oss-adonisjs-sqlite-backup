@@ -1,12 +1,24 @@
 import { prepared } from './helpers.js'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles } from '../src/bundles.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { checkDatabase } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
+import { internalHooks } from '../src/internal_hooks.js'
 import { bundleName } from '../src/names.js'
 import { openDatabase } from '../src/native.js'
+import { SqliteBackup } from '../src/sqlite_backup.js'
 import {
   countItems,
   makeLiveDatabase,
@@ -25,6 +37,61 @@ test.group('createBundle', (group) => {
   group.each.setup(() => {
     ;({ root, cleanup } = tempRoot())
     return () => cleanup()
+  })
+
+  test('owned reads refuse a source filename changed by the native driver', async ({ assert }) => {
+    const ordinary = join(root, 'live.db')
+    const spaced = `${ordinary} `
+    const alias = join(root, 'alias.db')
+    const directory = join(root, 'backups')
+    const original = makeLiveDatabase(join(root, 'original.db'), { rows: 3 })
+    original.close()
+    assert.equal(countItems(join(root, 'original.db')), 3)
+    renameSync(join(root, 'original.db'), spaced)
+    makeLiveDatabase(ordinary, { rows: 7 }).close()
+    assert.equal(countItems(ordinary), 7)
+    const spacedBytes = readFileSync(spaced)
+    const ordinaryBytes = readFileSync(ordinary)
+    symlinkSync(spaced, alias)
+
+    const config = {
+      connection: 'main',
+      connections: { main: { client: 'sqlite3', connection: { filename: spaced } } },
+    }
+    const service = new SqliteBackup(
+      { directory, keep: 7, lockTimeoutMs: 0, requireWal: false },
+      config
+    )
+    prepared({ directory })
+    for (const check of [
+      () => service.checkSource(),
+      () => service.create(),
+      () => createBundle(prepared({ livePath: spaced, directory })),
+      () => createBundle(prepared({ livePath: alias, directory })),
+    ]) {
+      const error = await Promise.resolve()
+        .then(check)
+        .catch((caught: unknown) => caught)
+      assert.equal((error as { code?: string } | undefined)?.code, 'E_BACKUP_SOURCE')
+      assert.match(String(error), /better-sqlite3 changes its filename/)
+    }
+    assert.deepEqual(readFileSync(spaced), spacedBytes)
+    assert.deepEqual(readFileSync(ordinary), ordinaryBytes)
+    assert.deepEqual(
+      readdirSync(directory).filter((name) => name.startsWith('bak-')),
+      []
+    )
+
+    const normal = new SqliteBackup(
+      { directory, keep: 7, lockTimeoutMs: 0, requireWal: false },
+      {
+        connection: 'main',
+        connections: { main: { client: 'sqlite3', connection: { filename: ordinary } } },
+      }
+    )
+    normal.checkSource()
+    const result = await normal.create()
+    assert.equal(countItems(join(result.path, 'db.sqlite')), 7)
   })
 
   test('publishes db, manifest and READY; files are read-only', async ({ assert }) => {
@@ -65,6 +132,32 @@ test.group('createBundle', (group) => {
     }
   }).timeout(30_000)
 
+  test('a second create waits while the first backup yields in this process', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live, { rows: 20_000 }).close()
+    const directory = join(root, 'b')
+    let resolveCopying!: () => void
+    const copying = new Promise<void>((resolve) => {
+      resolveCopying = resolve
+    })
+    const prior = internalHooks.step
+    internalHooks.step = (step) => {
+      if (step === 'create:copying') resolveCopying()
+    }
+    try {
+      const first = createBundle(prepared({ livePath: live, directory }))
+      await copying
+      const second = createBundle(prepared({ livePath: live, directory, lockTimeoutMs: 5_000 }))
+      const [one, two] = await within(Promise.all([first, second]), 10_000, 'overlapping creates')
+      assert.notEqual(one.name, two.name)
+      assert.equal(listBundles(directory).length, 2)
+    } finally {
+      internalHooks.step = prior
+    }
+  }).timeout(15_000)
+
   test('a failed check publishes nothing', async ({ assert }) => {
     const live = join(root, 'live.db')
     const db = makeLiveDatabase(live)
@@ -80,6 +173,212 @@ test.group('createBundle', (group) => {
       readdirSync(directory).filter((n) => n.startsWith('bak-')),
       []
     )
+  })
+
+  test('failed create unpublishes READY before a refused recursive cleanup', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    let readyWritten = false
+    internalHooks.durability = (event, path) => {
+      if (event === 'write' && path.endsWith('/READY')) readyWritten = true
+      if (readyWritten && event === 'sync' && path === directory)
+        throw new Error('post publication failure')
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /post publication failure/)
+      assert.match(
+        String((error as { cleanupError?: unknown }).cleanupError),
+        /recursive cleanup refused/
+      )
+      const bundles = readdirSync(directory).filter((name) => name.startsWith('bak-'))
+      assert.lengthOf(bundles, 1)
+      assert.isFalse(existsSync(join(directory, bundles[0], 'READY')))
+    } finally {
+      delete internalHooks.durability
+      delete internalHooks.step
+    }
+  })
+
+  test('source close failure preserves the create error and still releases the lock', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    let failedHandle: { name: string } | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        failedHandle = this
+        throw new Error('source close failed')
+      }
+      originalClose.call(this)
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('copy interrupted')
+    }
+    try {
+      const error = await createBundle({ livePath: live, directory }).catch(
+        (caught: unknown) => caught
+      )
+      assert.match(String(error), /copy interrupted/)
+      assert.match(
+        String((error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors?.[0]),
+        /source close failed/
+      )
+      acquireLock(directory).release()
+    } finally {
+      delete internalHooks.step
+      prototype.close = originalClose
+      if (failedHandle) originalClose.call(failedHandle)
+    }
+  })
+
+  test('keeps a non-Error copy failure with a source close failure', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    const closeFailure = new Error('source close failure')
+    let source: { name: string } | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        source = this
+        throw closeFailure
+      }
+      originalClose.call(this)
+    }
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw null
+    }
+    try {
+      const failure = await createBundle(prepared({ livePath: live, directory })).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [null, closeFailure])
+      assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
+        closeFailure,
+      ])
+      assert.deepEqual(listBundles(directory), [])
+    } finally {
+      delete internalHooks.step
+      prototype.close = originalClose
+      if (source) originalClose.call(source)
+    }
+  })
+
+  test('aggregates multiple native cleanup failures after a completed copy', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const lockPath = join(directory, '.backup.lock')
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    const sourceFailure = new Error('source close failure')
+    const lockFailure = new Error('lock close failure')
+    const handles: Array<{ name: string }> = []
+    prototype.close = function () {
+      if (this.name === live) {
+        handles.push(this)
+        throw sourceFailure
+      }
+      if (this.name === lockPath) {
+        handles.push(this)
+        throw lockFailure
+      }
+      originalClose.call(this)
+    }
+    try {
+      const failure = await createBundle({ livePath: live, directory }).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [sourceFailure, lockFailure])
+      assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
+        sourceFailure,
+        lockFailure,
+      ])
+      assert.deepEqual(listBundles(directory), [])
+    } finally {
+      prototype.close = originalClose
+      for (const handle of handles) originalClose.call(handle)
+    }
+  })
+
+  test('native cleanup failures after READY leave no published recovery point', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    mkdirSync(directory)
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    for (const failedPath of [live, join(directory, '.backup.lock')]) {
+      let failedHandle: { name: string } | undefined
+      prototype.close = function () {
+        if (this.name === failedPath) {
+          failedHandle = this
+          throw new Error('native close failed')
+        }
+        originalClose.call(this)
+      }
+      internalHooks.step = (step) => {
+        if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
+      }
+      try {
+        const error = await createBundle({ livePath: live, directory }).catch(
+          (caught: unknown) => caught
+        )
+        assert.match(String(error), /native close failed/)
+        assert.match(
+          String((error as { cleanupError?: unknown }).cleanupError),
+          /recursive cleanup refused/
+        )
+        assert.deepEqual(listBundles(directory), [])
+        assert.throws(() => verifyBundle(directory), /no READY bundle/)
+      } finally {
+        delete internalHooks.step
+        prototype.close = originalClose
+        if (failedHandle) originalClose.call(failedHandle)
+      }
+    }
+  })
+
+  test('non-Error work and recursive cleanup failures both remain observable', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw null
+      if (step === 'create:cleanup') throw 0
+    }
+    try {
+      const failure = await createBundle(prepared({ livePath: live, directory })).catch(
+        (error: unknown) => error
+      )
+      assert.instanceOf(failure, AggregateError)
+      assert.deepEqual((failure as AggregateError).errors, [null, 0])
+      assert.isTrue(Object.hasOwn(failure as object, 'cleanupError'))
+      assert.equal((failure as { cleanupError: unknown }).cleanupError, 0)
+    } finally {
+      delete internalHooks.step
+    }
   })
 
   test('checkDatabase reports page corruption', async ({ assert }) => {

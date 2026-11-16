@@ -1,5 +1,6 @@
 import { BackupException } from './errors.js'
 import type { BackupConfig, BackupConfigInput } from './types.js'
+import { validateLockTimeout } from './lock.js'
 
 /** Validate `config/backup.ts` and apply defaults. */
 export function defineConfig(input: BackupConfigInput): BackupConfig {
@@ -11,9 +12,7 @@ export function defineConfig(input: BackupConfigInput): BackupConfig {
     )
   }
   const lockTimeoutMs = input.lockTimeoutMs ?? 0
-  if (!Number.isInteger(lockTimeoutMs) || lockTimeoutMs < 0) {
-    throw new BackupException('E_BACKUP_UNSAFE', 'backup lockTimeoutMs must be an integer >= 0')
-  }
+  validateLockTimeout(lockTimeoutMs)
   return {
     connection: input.connection,
     directory: input.directory ?? '',

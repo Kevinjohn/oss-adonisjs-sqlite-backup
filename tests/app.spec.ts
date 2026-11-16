@@ -3,6 +3,8 @@
  * `db:backup` command through the ace kernel while Lucid keeps writing on its own connection.
  */
 import { test } from '@japa/runner'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
 import { chmodSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -17,9 +19,14 @@ import { SqliteBackup } from '../src/sqlite_backup.js'
 import SqliteBackupProvider from '../providers/sqlite_backup_provider.js'
 import { verifyBundle } from '../src/bundles.js'
 import { openDatabase } from '../src/native.js'
+import { acquireLock } from '../src/lock.js'
 import { countItems, startChild, stopChild, tempRoot, within } from './helpers.js'
 
-async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = true) {
+async function bootApp(
+  root: string,
+  withBackupConfig: boolean | 'disabled' = true,
+  backupDirectory?: string
+) {
   const live = join(root, 'live.db')
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
@@ -39,7 +46,8 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
         ...(withBackupConfig
           ? {
               backup: defineConfig({
-                directory: withBackupConfig === 'disabled' ? '' : join(root, 'backups'),
+                directory:
+                  withBackupConfig === 'disabled' ? '' : (backupDirectory ?? join(root, 'backups')),
               }),
             }
           : {}),
@@ -59,6 +67,25 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
   await app.start(() => {})
   return { app, live }
 }
+
+test('refused implicit create leaves an unsafe root permission unchanged', async ({ assert }) => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root, true, root)
+  try {
+    openDatabase(live).close()
+    chmodSync(root, 0o755)
+    const before = statSync(root).mode & 0o777
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/E_BACKUP_UNSAFE/)
+    assert.equal(statSync(root).mode & 0o777, before)
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
 
 test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
   let root: string
@@ -391,5 +418,135 @@ test('command reports the original create failure and its cleanup failure', asyn
     delete internalHooks.step
     await app.terminate()
     cleanup()
+  }
+}).timeout(30_000)
+
+test('command reports every native error from failed lock acquisition', async () => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root)
+  const prototype = Database.prototype as {
+    exec: (this: { name: string }, sql: string) => unknown
+    close: (this: { name: string }) => void
+  }
+  const originalExec = prototype.exec
+  const originalClose = prototype.close
+  let lockHandle: { name: string } | undefined
+  prototype.exec = function (sql) {
+    if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') throw false
+    return originalExec.call(this, sql)
+  }
+  prototype.close = function () {
+    if (this.name.endsWith('/.backup.lock')) {
+      lockHandle = this
+      throw 0
+    }
+    originalClose.call(this)
+  }
+  try {
+    openDatabase(live).close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/backup native cleanup failed: false/)
+    command.assertLogMatches(/backup native cleanup failed: 0/)
+  } finally {
+    prototype.exec = originalExec
+    prototype.close = originalClose
+    try {
+      if (lockHandle) originalClose.call(lockHandle)
+    } finally {
+      try {
+        await app.terminate()
+      } finally {
+        cleanup()
+      }
+    }
+  }
+}).timeout(30_000)
+
+test('command reports rollback and close failures without hiding the create error', async () => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root)
+  const prototype = Database.prototype as {
+    exec: (this: { name: string }, sql: string) => unknown
+    close: (this: { name: string }) => void
+  }
+  const originalExec = prototype.exec
+  const originalClose = prototype.close
+  let lockHandle: { name: string } | undefined
+  prototype.exec = function (sql) {
+    if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK')
+      throw new Error('rollback diagnostic')
+    return originalExec.call(this, sql)
+  }
+  prototype.close = function () {
+    if (this.name.endsWith('/.backup.lock')) {
+      lockHandle = this
+      throw new Error('close diagnostic')
+    }
+    originalClose.call(this)
+  }
+  internalHooks.step = (step) => {
+    if (step === 'create:copied') throw new Error('original copy diagnostic')
+  }
+  try {
+    const db = openDatabase(live)
+    db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+    db.close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/original copy diagnostic/)
+    command.assertLogMatches(/backup native cleanup failed: Error: rollback diagnostic/)
+    command.assertLogMatches(/backup native cleanup failed: Error: close diagnostic/)
+  } finally {
+    delete internalHooks.step
+    prototype.exec = originalExec
+    prototype.close = originalClose
+    try {
+      if (lockHandle) {
+        try {
+          originalExec.call(lockHandle, 'ROLLBACK')
+        } finally {
+          originalClose.call(lockHandle)
+        }
+      }
+      if (existsSync(join(root, 'backups'))) acquireLock(join(root, 'backups')).release()
+    } finally {
+      try {
+        await app.terminate()
+      } finally {
+        cleanup()
+      }
+    }
+  }
+}).timeout(30_000)
+
+test('command reports a falsy temporary cleanup failure', async () => {
+  const { root, cleanup } = tempRoot()
+  const { app, live } = await bootApp(root)
+  try {
+    const db = openDatabase(live)
+    db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+    db.close()
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('original copy failure')
+      if (step === 'create:cleanup') throw 0
+    }
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/original copy failure/)
+    command.assertLogMatches(/backup temp cleanup failed: 0/)
+  } finally {
+    delete internalHooks.step
+    try {
+      await app.terminate()
+    } finally {
+      cleanup()
+    }
   }
 }).timeout(30_000)

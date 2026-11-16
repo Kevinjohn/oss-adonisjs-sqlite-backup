@@ -22,6 +22,8 @@ test.group('config and source resolution', () => {
     assert.throws(() => defineConfig({ directory: '/b', keep: 0 }), /keep/)
     assert.throws(() => defineConfig({ directory: '/b', keep: 1.5 }), /keep/)
     assert.throws(() => defineConfig({ directory: '/b', lockTimeoutMs: -1 }), /lockTimeoutMs/)
+    assert.equal(defineConfig({ lockTimeoutMs: 2_147_483_647 }).lockTimeoutMs, 2_147_483_647)
+    assert.throws(() => defineConfig({ lockTimeoutMs: 2_147_483_648 }), /2147483647/)
     assert.equal(defineConfig({ directory: '' }).directory, '')
     assert.equal(defineConfig({}).directory, '')
   })
@@ -37,6 +39,8 @@ test.group('config and source resolution', () => {
       },
     }
     assert.equal(resolveSqliteSource(multi, 'other'), '/b.db')
+    assert.equal(resolveSqliteSource(sqlite('  /data/app.db  ')), '/data/app.db')
+    assert.equal(resolveSqliteSource(sqlite('/data/app.db  ', 'sqlite3')), '/data/app.db  ')
   })
 
   test('non-file and non-SQLite connections are refused', ({ assert }) => {
@@ -47,6 +51,9 @@ test.group('config and source resolution', () => {
       sqlite(''),
       sqlite(undefined),
       sqlite('file:/a.db?mode=memory'),
+      sqlite('  :memory:  '),
+      sqlite('   '),
+      sqlite('  file:/a.db?mode=memory  '),
     ]) {
       try {
         resolveSqliteSource(config)

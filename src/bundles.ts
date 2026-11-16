@@ -7,6 +7,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  unlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -17,10 +18,10 @@ import { BackupException } from './errors.js'
 import { realPath } from './paths.js'
 import { sha256File, syncPath, writeDurable } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
-import { acquireLock } from './lock.js'
+import { acquireCreateLock } from './lock.js'
 import { DATABASE, MANIFEST, READY, bundleName, isBundleName, parseBundleName } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
-import { assertSafeLayout, borrowedSourcePath } from './source.js'
+import { assertSafeLayout, borrowedSourcePath, openOwnedSource } from './source.js'
 import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.js'
 
 /** A clock-step allowance: a newest bundle further ahead of the clock than this is refused. */
@@ -184,16 +185,42 @@ export async function createBundle(
   const directory = realPath(input.directory)
   assertDirectory(directory, true)
   assertSafeLayout(livePath, directory)
-  const lock = acquireLock(directory, lockTimeoutMs)
+  const lock = await acquireCreateLock(directory, lockTimeoutMs)
   const warnings: string[] = []
   let bundlePath: string | undefined
   let source: NativeDatabase | undefined
+  let primaryError: unknown
+  let failed = false
+  let result: CreateResult | undefined
+  const cleanupErrors: unknown[] = []
+  const cleanupFailedBundle = (error: unknown): unknown => {
+    if (!bundlePath) return error
+    try {
+      const marker = join(bundlePath, READY)
+      if (existsSync(marker)) {
+        unlinkSync(marker)
+        syncPath(bundlePath)
+      }
+      internalHooks.step?.('create:cleanup', bundlePath)
+      rmSync(bundlePath, { recursive: true, force: true })
+    } catch (cleanupError) {
+      if (error instanceof Error) {
+        Object.defineProperty(error, 'cleanupError', { value: cleanupError })
+      } else {
+        const combined = new AggregateError([error, cleanupError], 'bundle cleanup failed')
+        Object.defineProperty(combined, 'cleanupError', { value: cleanupError })
+        return combined
+      }
+    }
+    return error
+  }
   try {
     let journalMode: string
     try {
-      source = borrowed ?? openDatabase(livePath, { fileMustExist: true, readonly: true })
+      source = borrowed ?? openOwnedSource(livePath)
       journalMode = String(source.pragma('journal_mode', { simple: true }))
     } catch (cause) {
+      if (cause instanceof BackupException) throw cause
       throw new BackupException('E_BACKUP_SOURCE', `live database ${livePath} cannot be read`, {
         cause,
       })
@@ -293,20 +320,45 @@ export async function createBundle(
     writeDurable(join(bundlePath, READY), '')
     syncPath(bundlePath)
     syncPath(directory)
-    return { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
+    result = { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
   } catch (error) {
-    if (bundlePath) {
-      try {
-        internalHooks.step?.('create:cleanup', bundlePath)
-        rmSync(bundlePath, { recursive: true, force: true })
-      } catch (cleanupError) {
-        if (error instanceof Error)
-          Object.defineProperty(error, 'cleanupError', { value: cleanupError })
+    failed = true
+    primaryError = cleanupFailedBundle(error)
+  } finally {
+    try {
+      if (!borrowed) source?.close()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    try {
+      lock.release()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+  }
+  if (failed) {
+    if (cleanupErrors.length) {
+      if (primaryError instanceof Error)
+        Object.defineProperty(primaryError, 'resourceCleanupErrors', { value: cleanupErrors })
+      else {
+        const combined = new AggregateError(
+          [primaryError, ...cleanupErrors],
+          'bundle creation and cleanup failed'
+        )
+        Object.defineProperty(combined, 'resourceCleanupErrors', { value: cleanupErrors })
+        throw combined
       }
     }
-    throw error
-  } finally {
-    if (!borrowed) source?.close()
-    lock.release()
+    throw primaryError
   }
+  if (cleanupErrors.length) {
+    const failure =
+      cleanupErrors.length === 1
+        ? cleanupErrors[0]
+        : new AggregateError(cleanupErrors, 'native resource cleanup failed')
+    if (failure instanceof AggregateError)
+      Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
+    throw cleanupFailedBundle(failure)
+  }
+  return result!
 }

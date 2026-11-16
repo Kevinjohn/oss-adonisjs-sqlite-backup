@@ -5,6 +5,7 @@ import { prepared } from './helpers.js'
  */
 import { test } from '@japa/runner'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -85,6 +86,45 @@ test.group('kernel-faithful paths', (group) => {
     // The same when the raw filename is passed to createBundle directly.
     const direct = await createBundle(prepared({ livePath: filename, directory: join(root, 'b') }))
     assert.equal(markerOf(join(direct.path, 'db.sqlite')), 'what-the-app-uses')
+  })
+
+  test('configured padded filename identifies the file opened by better-sqlite3', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    markedDatabase(live, 'driver-file')
+    const handle = openDatabase(`${live} `, { fileMustExist: true, readonly: true })
+    try {
+      const main = (handle.pragma('database_list') as Array<{ name: string; file: string }>).find(
+        (entry) => entry.name === 'main'
+      )
+      assert.equal(main?.file, live)
+    } finally {
+      handle.close()
+    }
+    const source = resolveSqliteSource(lucid(`${live} `))
+    assert.equal(source, live)
+    const bundle = await createBundle(prepared({ livePath: source, directory: join(root, 'b') }))
+    assert.equal(markerOf(join(bundle.path, 'db.sqlite')), 'driver-file')
+  })
+
+  test('realPath propagates permission errors while inspecting an existing directory', ({
+    assert,
+  }) => {
+    const denied = join(root, 'denied')
+    mkdirSync(denied)
+    chmodSync(denied, 0o000)
+    try {
+      let failure: NodeJS.ErrnoException | undefined
+      try {
+        realPath(join(denied, 'live.db'))
+      } catch (error) {
+        failure = error as NodeJS.ErrnoException
+      }
+      assert.equal(failure?.code, 'EACCES')
+    } finally {
+      chmodSync(denied, 0o700)
+    }
   })
 
   test('P1: .. across two symlinked folders', async ({ assert }) => {
@@ -331,7 +371,15 @@ test.group('kernel-faithful paths', (group) => {
     writeFileSync(join(root, 'file'), '')
     const real = realpathSync(root)
     assert.equal(realPath(`${root}/alias/../new/a/b.db`), `${real}/deep/new/a/b.db`)
-    assert.equal(realPath(`${root}/file/inner.db`), `${real}/file/inner.db`) // ENOTDIR
+    for (const path of [
+      `${root}/file/inner.db`,
+      `${root}/file/../new.db`,
+      `${root}/file/.`,
+      `${root}/file/`,
+    ]) {
+      assert.throws(() => realPath(path), /non-directory/)
+      assert.throws(() => realpathSync.native(path), /ENOTDIR/)
+    }
     assert.throws(() => realPath(`${root}/missing/../x.db`), /after a missing folder/)
   })
 

@@ -1,11 +1,27 @@
 import { statSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
 import { BackupException } from './errors.js'
-import type { NativeDatabase } from './native.js'
+import { openDatabase, type NativeDatabase } from './native.js'
 import { realPath } from './paths.js'
 import type { LucidDatabaseConfig } from './types.js'
 
 const SQLITE_CLIENTS = new Set(['better-sqlite3', 'sqlite3', 'sqlite'])
+
+/** Match better-sqlite3's constructor before interpreting a configured filename. */
+export function normalizeConfiguredSqliteFilename(filename: string, client: string): string {
+  return client === 'better-sqlite3' ? filename.trim() : filename
+}
+
+/** Open a resolved, owned source only when the native driver will use that exact file path. */
+export function openOwnedSource(path: string): NativeDatabase {
+  if (normalizeConfiguredSqliteFilename(path, 'better-sqlite3') !== path) {
+    throw new BackupException(
+      'E_BACKUP_SOURCE',
+      `live database ${JSON.stringify(path)} cannot be read: better-sqlite3 changes its filename when opening it`
+    )
+  }
+  return openDatabase(path, { fileMustExist: true, readonly: true })
+}
 
 /** Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would. */
 export function resolveSqliteSource(
@@ -20,8 +36,12 @@ export function resolveSqliteSource(
   if (!SQLITE_CLIENTS.has(node.client)) {
     throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" uses ${node.client}`)
   }
-  const filename = (node.connection as { filename?: unknown } | undefined)?.filename
-  if (typeof filename !== 'string' || filename === '' || filename === ':memory:') {
+  const configuredFilename = (node.connection as { filename?: unknown } | undefined)?.filename
+  if (typeof configuredFilename !== 'string') {
+    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
+  }
+  const filename = normalizeConfiguredSqliteFilename(configuredFilename, node.client)
+  if (filename === '' || filename === ':memory:') {
     throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
   }
   if (/^file:/i.test(filename)) {
