@@ -24,6 +24,7 @@ export function prepareDirectory(path: string): void {
     }
     syncPath(dirname(current))
   }
+  assertDirectory(directory)
   chmodSync(directory, 0o700)
 }
 
