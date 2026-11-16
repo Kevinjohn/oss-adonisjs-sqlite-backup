@@ -3,7 +3,14 @@
  * running real migrations.
  */
 import { test } from '@japa/runner'
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -119,6 +126,20 @@ test.group('db:upgrade', (group) => {
     )
     assert.equal(preMigrationBackupDirectory('live.db'), `${resolve('live.db')}.backups`)
     assert.equal(preMigrationBackupDirectory('live.db', ''), `${resolve('live.db')}.backups`)
+  })
+
+  test('pre-migration paths follow symlinks before parent traversal', ({ assert }) => {
+    mkdirSync(join(root, 'deep', 'nested'), { recursive: true })
+    mkdirSync(join(root, 'deep', 'store'))
+    writeFileSync(join(root, 'deep', 'live.db'), '')
+    symlinkSync(join(root, 'deep', 'nested'), join(root, 'alias'))
+    const configured = `${root}/alias/../store`
+    const database = `${root}/alias/../live.db`
+    assert.equal(
+      preMigrationBackupDirectory(database, configured),
+      join(realpathSync.native(configured), 'pre-migration')
+    )
+    assert.equal(preMigrationBackupDirectory(database), `${realpathSync.native(database)}.backups`)
   })
 
   test('migrates an empty database without a snapshot', async ({ assert }) => {

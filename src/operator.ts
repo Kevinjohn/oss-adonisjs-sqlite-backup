@@ -1,6 +1,7 @@
 import { existsSync, lstatSync } from 'node:fs'
 import type { Database } from '@adonisjs/lucid/database'
 import type { NativeDatabase } from './native.js'
+import { normalizeConfiguredSqliteFilename } from './source.js'
 
 /**
  * Checks that a stopped-server operator command may open the primary connection, and returns the
@@ -15,8 +16,18 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
   if (config?.client !== 'better-sqlite3' || config.pool?.max !== 1) {
     throw new Error('Operator commands require the configured single-connection SQLite pool')
   }
-  const path = (config.connection as { filename: string }).filename
-  if (path === ':memory:' || !existsSync(path) || !lstatSync(path).isFile()) {
+  const configuredFilename = (config.connection as { filename?: unknown } | undefined)?.filename
+  const path =
+    typeof configuredFilename === 'string'
+      ? normalizeConfiguredSqliteFilename(configuredFilename, config.client)
+      : ''
+  if (
+    !path ||
+    path === ':memory:' ||
+    /^file:/i.test(path) ||
+    !existsSync(path) ||
+    !lstatSync(path).isFile()
+  ) {
     throw new Error('Operator commands require an existing on-disk database')
   }
   return path
