@@ -14,10 +14,11 @@ const segments = (path: string) => {
 /**
  * The real path the kernel (and SQLite) reaches for `path`, relative paths taken from the current
  * folder. It walks one segment at a time: a symlink's text is spliced into the remaining segments
- * and `..` steps up from the real folder reached so far, never from the text. When the file exists
- * the result equals `fs.realpathSync.native` (libc). Node's JS `fs.realpathSync` is not a reference:
- * it collapses `..` as text first. At the first missing segment the rest is appended as is; a
- * `.` or `..` after that is refused, since the kernel would fail with ENOENT.
+ * and `..` steps up from the real folder reached so far, never from the text. Existing paths
+ * match `fs.realpathSync.native` when no segment traverses a regular file. A regular file followed
+ * by another segment, including a trailing slash or `.`, is refused. At the first missing segment
+ * the rest is appended as is; the result need not exist. A `.` or `..` after a missing segment is
+ * refused, since the kernel would fail with ENOENT.
  *
  * Never pass the input through `path.resolve` or `path.normalize` first: they collapse `..` before
  * symlinks are followed.
