@@ -103,12 +103,10 @@ export default class DbBackup extends BaseCommand {
       const code = error instanceof BackupException ? `${error.code}: ` : ''
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
-      const cleanupError =
-        error !== null && typeof error === 'object'
-          ? (error as { cleanupError?: unknown }).cleanupError
-          : undefined
       if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
-        this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+        this.logger.error(
+          `backup temp cleanup failed: ${String((error as { cleanupError?: unknown }).cleanupError)}`
+        )
       const resourceErrors =
         (error !== null && typeof error === 'object'
           ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
