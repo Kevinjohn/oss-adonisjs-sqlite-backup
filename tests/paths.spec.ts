@@ -331,7 +331,15 @@ test.group('kernel-faithful paths', (group) => {
     writeFileSync(join(root, 'file'), '')
     const real = realpathSync(root)
     assert.equal(realPath(`${root}/alias/../new/a/b.db`), `${real}/deep/new/a/b.db`)
-    assert.equal(realPath(`${root}/file/inner.db`), `${real}/file/inner.db`) // ENOTDIR
+    for (const path of [
+      `${root}/file/inner.db`,
+      `${root}/file/../new.db`,
+      `${root}/file/.`,
+      `${root}/file/`,
+    ]) {
+      assert.throws(() => realPath(path), /non-directory/)
+      assert.throws(() => realpathSync.native(path), /ENOTDIR/)
+    }
     assert.throws(() => realPath(`${root}/missing/../x.db`), /after a missing folder/)
   })
 
