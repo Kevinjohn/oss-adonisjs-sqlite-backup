@@ -87,6 +87,26 @@ test.group('kernel-faithful paths', (group) => {
     assert.equal(markerOf(join(direct.path, 'db.sqlite')), 'what-the-app-uses')
   })
 
+  test('configured padded filename identifies the file opened by better-sqlite3', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    markedDatabase(live, 'driver-file')
+    const handle = openDatabase(`${live} `, { fileMustExist: true, readonly: true })
+    try {
+      const main = (handle.pragma('database_list') as Array<{ name: string; file: string }>).find(
+        (entry) => entry.name === 'main'
+      )
+      assert.equal(main?.file, live)
+    } finally {
+      handle.close()
+    }
+    const source = resolveSqliteSource(lucid(`${live} `))
+    assert.equal(source, live)
+    const bundle = await createBundle(prepared({ livePath: source, directory: join(root, 'b') }))
+    assert.equal(markerOf(join(bundle.path, 'db.sqlite')), 'driver-file')
+  })
+
   test('P1: .. across two symlinked folders', async ({ assert }) => {
     mkdirSync(join(root, 'a', 'b'), { recursive: true })
     mkdirSync(join(root, 'c', 'd'), { recursive: true })
@@ -331,7 +351,15 @@ test.group('kernel-faithful paths', (group) => {
     writeFileSync(join(root, 'file'), '')
     const real = realpathSync(root)
     assert.equal(realPath(`${root}/alias/../new/a/b.db`), `${real}/deep/new/a/b.db`)
-    assert.equal(realPath(`${root}/file/inner.db`), `${real}/file/inner.db`) // ENOTDIR
+    for (const path of [
+      `${root}/file/inner.db`,
+      `${root}/file/../new.db`,
+      `${root}/file/.`,
+      `${root}/file/`,
+    ]) {
+      assert.throws(() => realPath(path), /non-directory/)
+      assert.throws(() => realpathSync.native(path), /ENOTDIR/)
+    }
     assert.throws(() => realPath(`${root}/missing/../x.db`), /after a missing folder/)
   })
 
