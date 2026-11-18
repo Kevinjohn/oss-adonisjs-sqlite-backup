@@ -167,7 +167,8 @@ test('surfaces unexpected SQLite writer errors instead of counting them as busy'
     (error: unknown) => ({ error })
   )
   try {
-    await within(errorObserved, 9000, 'writer error observation did not complete')
+    // The operation settles first when the writer fails some other way; the assertions report it.
+    await Promise.race([errorObserved, outcome])
     releaseOperation()
     const result = await outcome
     assert.ok('error' in result)
