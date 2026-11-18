@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- A trailing slash on a folder that does not exist yet is accepted again, so `prepareDirectory`
+  creates a backup directory configured as `/path/backups/` on first use. 0.3.0 refused it with
+  `E_BACKUP_UNSAFE` and a message about `.` after a missing folder. A trailing slash after a
+  regular file, and `.` or `..` after a missing folder, are still refused. A restore target
+  written with a trailing slash is still refused, now with a message that says so.
+
 ## 0.3.0 - 2026-11-16
 
 - `db:upgrade` snapshots use the primary connection's migrations table and the backup config's

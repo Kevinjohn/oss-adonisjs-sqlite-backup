@@ -333,6 +333,24 @@ test.group('kernel-faithful paths', (group) => {
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
   })
 
+  test('a restore target written with a trailing slash is refused', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    await createBundle(prepared({ livePath: live, directory }))
+    mkdirSync(join(root, 'elsewhere'))
+    symlinkSync(join(root, 'elsewhere', 'new.db'), join(root, 't.db'))
+    for (const target of [`${join(root, 't.db')}/`, `${join(root, 'plain.db')}/`]) {
+      assert.equal(
+        await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+        'E_BACKUP_UNSAFE',
+        target
+      )
+    }
+    assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
+    assert.isFalse(existsSync(join(root, 'plain.db')))
+  })
+
   test('realPath equals realpathSync for every existing fixture path', ({ assert }) => {
     mkdirSync(join(root, 'deep', 'x'), { recursive: true })
     mkdirSync(join(root, 'a', 'b'), { recursive: true })
@@ -381,6 +399,18 @@ test.group('kernel-faithful paths', (group) => {
       assert.throws(() => realpathSync.native(path), /ENOTDIR/)
     }
     assert.throws(() => realPath(`${root}/missing/../x.db`), /after a missing folder/)
+    assert.throws(() => realPath(`${root}/missing/./x.db`), /after a missing folder/)
+    assert.throws(() => realPath(`${root}/missing/.`), /after a missing folder/)
+  })
+
+  test('realPath drops a trailing slash after a missing segment', ({ assert }) => {
+    mkdirSync(join(root, 'deep', 'x'), { recursive: true })
+    symlinkSync(join(root, 'deep', 'x'), join(root, 'alias'))
+    symlinkSync('gone/', join(root, 'dangling'))
+    const real = realpathSync(root)
+    assert.equal(realPath(`${root}/alias/../new/backups/`), `${real}/deep/new/backups`)
+    assert.equal(realPath(`${root}/new//`), `${real}/new`)
+    assert.equal(realPath(`${root}/dangling/backups/`), `${real}/gone/backups`)
   })
 
   test('Z7: relative paths start at the real cwd, not $PWD', ({ assert }) => {
