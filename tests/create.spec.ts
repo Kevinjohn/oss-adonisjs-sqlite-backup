@@ -179,7 +179,7 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     let readyWritten = false
     internalHooks.durability = (event, path) => {
       if (event === 'write' && path.endsWith('/READY')) readyWritten = true
@@ -213,7 +213,7 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const prototype = Database.prototype as { close: (this: { name: string }) => void }
     const originalClose = prototype.close
     let failedHandle: { name: string } | undefined
@@ -283,7 +283,7 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const lockPath = join(directory, '.backup.lock')
     const prototype = Database.prototype as { close: (this: { name: string }) => void }
     const originalClose = prototype.close
@@ -324,7 +324,7 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const prototype = Database.prototype as { close: (this: { name: string }) => void }
     const originalClose = prototype.close
     for (const failedPath of [live, join(directory, '.backup.lock')]) {
