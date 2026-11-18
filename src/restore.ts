@@ -23,6 +23,14 @@ export function prepareRestore(input: {
   livePath: string
   name?: string
 }): { bundle: string; target: string } {
+  // realPath drops a trailing slash after a missing segment, and the as-given check below would
+  // follow a dangling symlink through it.
+  if (input.target.endsWith('/')) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      `restore target ${input.target} names a folder; give the file to create`
+    )
+  }
   const target = realPath(input.target)
   if (normalizeConfiguredSqliteFilename(target, 'better-sqlite3') !== target) {
     throw new BackupException(

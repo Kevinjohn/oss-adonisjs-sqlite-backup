@@ -333,6 +333,24 @@ test.group('kernel-faithful paths', (group) => {
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
   })
 
+  test('a restore target written with a trailing slash is refused', async ({ assert }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    await createBundle(prepared({ livePath: live, directory }))
+    mkdirSync(join(root, 'elsewhere'))
+    symlinkSync(join(root, 'elsewhere', 'new.db'), join(root, 't.db'))
+    for (const target of [`${join(root, 't.db')}/`, `${join(root, 'plain.db')}/`]) {
+      assert.equal(
+        await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+        'E_BACKUP_UNSAFE',
+        target
+      )
+    }
+    assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
+    assert.isFalse(existsSync(join(root, 'plain.db')))
+  })
+
   test('realPath equals realpathSync for every existing fixture path', ({ assert }) => {
     mkdirSync(join(root, 'deep', 'x'), { recursive: true })
     mkdirSync(join(root, 'a', 'b'), { recursive: true })
