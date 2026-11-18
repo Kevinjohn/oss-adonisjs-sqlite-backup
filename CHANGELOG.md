@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-11-18
+
 - A trailing slash on a folder that does not exist yet is accepted again, so `prepareDirectory`
   creates a backup directory configured as `/path/backups/` on first use. 0.3.0 refused it with
   `E_BACKUP_UNSAFE` and a message about `.` after a missing folder. A trailing slash after a
