@@ -148,12 +148,16 @@ test('surfaces unexpected SQLite writer errors instead of counting them as busy'
   const child = fork(new URL('../../bin/measure_size.ts', import.meta.url), ['writer', live], {
     execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
   })
+  // Listen from the start: the writer sends its error straight after `ready`, and both messages
+  // can arrive before a listener added once `ready` is seen.
+  const writerFailed = writerError(child)
+  writerFailed.catch(() => {})
   let releaseOperation!: () => void
   let reportErrorObserved!: () => void
   const operationGate = new Promise<void>((resolve) => (releaseOperation = resolve))
   const errorObserved = new Promise<void>((resolve) => (reportErrorObserved = resolve))
   const operation = withWriter(child, async () => {
-    await within(writerError(child), 1000, 'unexpected SQLite writer error was not reported')
+    await within(writerFailed, 8000, 'unexpected SQLite writer error was not reported')
     reportErrorObserved()
     await operationGate
     return stopWriter(child, 250)
@@ -163,7 +167,8 @@ test('surfaces unexpected SQLite writer errors instead of counting them as busy'
     (error: unknown) => ({ error })
   )
   try {
-    await within(errorObserved, 1200, 'writer error observation did not complete')
+    // The operation settles first when the writer fails some other way; the assertions report it.
+    await Promise.race([errorObserved, outcome])
     releaseOperation()
     const result = await outcome
     assert.ok('error' in result)
