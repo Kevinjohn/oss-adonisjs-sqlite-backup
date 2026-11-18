@@ -13,6 +13,7 @@ export interface DirectoryLock {
 }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
+const localLocks = new Map<string, WeakRef<NativeDatabase>>()
 export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
 
 export function validateLockTimeout(timeoutMs: number): void {
@@ -91,7 +92,9 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   }
   let handle: NativeDatabase
   try {
-    handle = tryLock(path, timeoutMs)
+    // A holder on this event loop cannot make progress while SQLite waits synchronously.
+    const wait = localLocks.get(path)?.deref()?.inTransaction ? 0 : timeoutMs
+    handle = tryLock(path, wait)
   } catch (error) {
     if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
     const code = (error as { code?: string }).code
@@ -105,6 +108,8 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     truncateLockFile(path)
     return acquireLock(directory, timeoutMs)
   }
+  const reference = new WeakRef(handle)
+  localLocks.set(path, reference)
   let released = false
   return {
     release() {
@@ -122,6 +127,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       try {
         handle.close()
         released = true
+        if (localLocks.get(path) === reference) localLocks.delete(path)
       } catch (error) {
         closeError = error
         closeFailed = true

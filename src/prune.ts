@@ -30,9 +30,12 @@ export function pruneBundles(input: {
   assertDirectory(directory, true)
   const lock = acquireLock(directory, lockTimeoutMs)
   try {
-    const names = bundleDirectories(directory)
-    const ready = names.filter((name) => existsSync(join(directory, name, READY)))
-    const unfinished = names.filter((name) => !ready.includes(name))
+    const ready: string[] = []
+    const unfinished: string[] = []
+    for (const name of bundleDirectories(directory)) {
+      const group = existsSync(join(directory, name, READY)) ? ready : unfinished
+      group.push(name)
+    }
     const remove = (name: string, into: string[]) => {
       const path = join(directory, name)
       try {
@@ -52,8 +55,20 @@ export function pruneBundles(input: {
       remove(name, result.removed)
     for (const name of unfinished) remove(name, result.abandoned)
     if (result.removed.length + result.abandoned.length > 0) syncPath(directory)
-    return result
-  } finally {
-    lock.release()
+  } catch (error) {
+    try {
+      lock.release()
+    } catch (cleanupError) {
+      if (error instanceof Error) {
+        Object.defineProperty(error, 'resourceCleanupErrors', { value: [cleanupError] })
+      } else {
+        const combined = new AggregateError([error, cleanupError], 'prune and cleanup failed')
+        Object.defineProperty(combined, 'resourceCleanupErrors', { value: [cleanupError] })
+        throw combined
+      }
+    }
+    throw error
   }
+  lock.release()
+  return result
 }

@@ -2,9 +2,10 @@ import { createBundle, listBundles, verifyBundle } from './bundles.js'
 import { prepareDirectory } from './directory.js'
 import { BackupException } from './errors.js'
 import type { NativeDatabase } from './native.js'
+import { realPath } from './paths.js'
 import { pruneBundles } from './prune.js'
 import { prepareRestore } from './restore.js'
-import { openOwnedSource, resolveSqliteSource } from './source.js'
+import { isWithin, openOwnedSource, resolveSqliteSource } from './source.js'
 import type { BackupConfig, LucidDatabaseConfig } from './types.js'
 
 /** Backup service bound in the container as `sqlite.backup`. */
@@ -82,8 +83,22 @@ export class SqliteBackup {
   }
 
   prune(options: { keep?: number } = {}) {
+    const directory = realPath(this.directory())
+    let livePath: string | undefined
+    try {
+      livePath = resolveSqliteSource(this.database, this.config.connection)
+    } catch (error) {
+      // A service can create backups from borrowed handles without a configured file source.
+      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_SOURCE') throw error
+    }
+    if (livePath !== undefined && isWithin(directory, livePath)) {
+      throw new BackupException(
+        'E_BACKUP_UNSAFE',
+        `backup directory ${directory} contains the live database`
+      )
+    }
     return pruneBundles({
-      directory: this.directory(),
+      directory,
       keep: options.keep ?? this.config.keep,
       lockTimeoutMs: this.config.lockTimeoutMs,
     })
