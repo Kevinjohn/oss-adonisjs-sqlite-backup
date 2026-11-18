@@ -381,6 +381,18 @@ test.group('kernel-faithful paths', (group) => {
       assert.throws(() => realpathSync.native(path), /ENOTDIR/)
     }
     assert.throws(() => realPath(`${root}/missing/../x.db`), /after a missing folder/)
+    assert.throws(() => realPath(`${root}/missing/./x.db`), /after a missing folder/)
+    assert.throws(() => realPath(`${root}/missing/.`), /after a missing folder/)
+  })
+
+  test('realPath drops a trailing slash after a missing segment', ({ assert }) => {
+    mkdirSync(join(root, 'deep', 'x'), { recursive: true })
+    symlinkSync(join(root, 'deep', 'x'), join(root, 'alias'))
+    symlinkSync('gone/', join(root, 'dangling'))
+    const real = realpathSync(root)
+    assert.equal(realPath(`${root}/alias/../new/backups/`), `${real}/deep/new/backups`)
+    assert.equal(realPath(`${root}/new//`), `${real}/new`)
+    assert.equal(realPath(`${root}/dangling/backups/`), `${real}/gone/backups`)
   })
 
   test('Z7: relative paths start at the real cwd, not $PWD', ({ assert }) => {

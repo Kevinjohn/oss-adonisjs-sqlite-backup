@@ -86,6 +86,16 @@ test.group('durability', (group) => {
     assert.deepEqual(readFileSync(file), bytes)
   })
 
+  test('preparing a missing root written with a trailing slash creates it', ({ assert }) => {
+    const directory = join(root, 'nested', 'backups')
+    prepareDirectory(`${directory}/`)
+    assert.equal(statSync(directory).mode & 0o777, 0o700)
+
+    const file = join(root, 'backup-root')
+    writeFileSync(file, '')
+    assert.throws(() => prepareDirectory(`${file}/`), /non-directory/)
+  })
+
   test('preparing existing permissive directories tightens their mode', ({ assert }) => {
     for (const mode of [0o755, 0o777]) {
       const directory = join(root, `mode-${mode.toString(8)}`)

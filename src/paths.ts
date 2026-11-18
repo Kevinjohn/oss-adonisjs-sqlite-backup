@@ -5,9 +5,12 @@ import { BackupException } from './errors.js'
 /** Symlink hops followed before giving up, as Linux does (MAXSYMLINKS). */
 const MAX_LINKS = 40
 
+/** Stands for a trailing slash. It cannot be a folder name, since paths are split on it. */
+const TRAILING_SLASH = '/'
+
 const segments = (path: string) => {
   const parts = path.split('/').filter((s) => s !== '')
-  if (path.endsWith('/')) parts.push('.')
+  if (path.endsWith('/')) parts.push(TRAILING_SLASH)
   return parts
 }
 
@@ -18,7 +21,8 @@ const segments = (path: string) => {
  * match `fs.realpathSync.native` when no segment traverses a regular file. A regular file followed
  * by another segment, including a trailing slash or `.`, is refused. At the first missing segment
  * the rest is appended as is; the result need not exist. A `.` or `..` after a missing segment is
- * refused, since the kernel would fail with ENOENT.
+ * refused, since the kernel would fail with ENOENT. A trailing slash after a missing segment is
+ * dropped: it names a folder still to be made, as `mkdir` accepts.
  *
  * Never pass the input through `path.resolve` or `path.normalize` first: they collapse `..` before
  * symlinks are followed.
@@ -34,6 +38,7 @@ export function realPath(path: string): string {
     if (!directory) {
       throw new BackupException('E_BACKUP_UNSAFE', `path ${path} traverses a non-directory`)
     }
+    if (segment === TRAILING_SLASH) continue
     if (segment === '.') {
       if (missing)
         throw new BackupException('E_BACKUP_UNSAFE', `path ${path} has . after a missing folder`)
