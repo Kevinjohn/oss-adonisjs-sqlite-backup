@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-11-19
+
+- Check snapshot path safety before preparing the backup directory, and verify the pre-upgrade
+  snapshot before running migrations.
+- Refuse configured prune when the archive directory contains the live database. Report same-process
+  lock contention immediately and preserve observed deletion progress if finalization fails.
+
 ## 0.3.1 - 2026-11-18
 
 - A trailing slash on a folder that does not exist yet is accepted again, so `prepareDirectory`
