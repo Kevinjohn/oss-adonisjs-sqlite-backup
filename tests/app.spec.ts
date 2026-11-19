@@ -5,7 +5,7 @@
 import { test } from '@japa/runner'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
-import { chmodSync, existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
@@ -20,7 +20,14 @@ import SqliteBackupProvider from '../providers/sqlite_backup_provider.js'
 import { verifyBundle } from '../src/bundles.js'
 import { openDatabase } from '../src/native.js'
 import { acquireLock } from '../src/lock.js'
-import { countItems, startChild, stopChild, createTemporaryRoot, within } from './helpers.js'
+import {
+  countItems,
+  failDirectorySync,
+  startChild,
+  stopChild,
+  createTemporaryRoot,
+  within,
+} from './helpers.js'
 
 interface BootAppOptions {
   withBackupConfig?: boolean | 'disabled'
@@ -444,6 +451,49 @@ test('command reports the original create failure and its cleanup failure', asyn
     command.assertLogMatches(/backup temp cleanup failed: Error: cleanup permission failure/)
   } finally {
     delete internalHooks.step
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
+
+test('prune reports observed removals and earlier failures when archive sync fails', async ({
+  assert,
+}) => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root)
+  const directory = join(root, 'backups')
+  try {
+    openDatabase(live).close()
+    prepareDirectory(directory)
+    const oldest = await createBundle({ livePath: live, directory })
+    const newest = await createBundle({ livePath: live, directory })
+    const abandoned = 'bak-utc-20010101-000000-001'
+    const interrupted = 'bak-utc-20010101-000000-002'
+    mkdirSync(join(directory, abandoned))
+    mkdirSync(join(directory, interrupted))
+    internalHooks.step = (step, name) => {
+      if (step === 'prune:unpublished' && name === interrupted) throw new Error('remove failed')
+    }
+    const restoreSync = failDirectorySync(directory, new Error('final archive sync failed'))
+    try {
+      const ace = await app.container.make('ace')
+      ace.ui.switchMode('raw')
+      const command = await ace.exec('db:backup', ['prune', '--keep', '1'])
+      command.assertFailed()
+      command.assertLogMatches(/db:backup prune failed: final archive sync failed/)
+      command.assertLogMatches(new RegExp(`Observed removed bundle: ${oldest.name}`))
+      command.assertLogMatches(new RegExp(`Observed removed unfinished bundle: ${abandoned}`))
+      command.assertLogMatches(new RegExp(`could not remove ${interrupted}: Error: remove failed`))
+      command.assertLogMatches(/Archive sync failed. Removal durability is unconfirmed./)
+      assert.isFalse(existsSync(oldest.path))
+      assert.isTrue(existsSync(newest.path))
+      assert.isFalse(existsSync(join(directory, abandoned)))
+      assert.isTrue(existsSync(join(directory, interrupted)))
+    } finally {
+      restoreSync()
+      delete internalHooks.step
+    }
+  } finally {
     await app.terminate()
     cleanup()
   }

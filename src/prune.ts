@@ -8,13 +8,22 @@ import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { acquireLock } from './lock.js'
 import { READY } from './names.js'
-import type { PruneResult } from './types.js'
+import type { PruneProgress, PruneResult } from './types.js'
+
+function attachProgress(error: unknown, progress: PruneProgress): Error {
+  const failure =
+    error instanceof Error && Object.isExtensible(error)
+      ? error
+      : new Error(String(error), { cause: error })
+  return Object.defineProperty(failure, 'pruneProgress', { value: progress })
+}
 
 /**
  * Keep the newest `keep` READY bundles (newest = latest name; names only increase) and remove the
  * rest. Unfinished bundles (no READY) are removed too: create holds the lock for its whole run, so
  * an unfinished bundle seen under the lock belongs to a create that crashed. Only directories
- * matching the bundle name pattern are ever touched. Removal failures are reported, not thrown.
+ * matching the bundle name pattern are ever touched. Per-item failures are returned in the result.
+ * If finalization fails, the thrown error carries the observed `pruneProgress`.
  */
 export function pruneBundles(input: {
   directory: string
@@ -32,6 +41,7 @@ export function pruneBundles(input: {
   const result: PruneResult = { removed: [], abandoned: [], failed: [] }
   assertDirectory(directory, { requirePrivateRoot: true })
   const lock = acquireLock(directory, lockTimeoutMs)
+  let syncingArchive = false
   try {
     const ready: string[] = []
     const unfinished: string[] = []
@@ -57,8 +67,14 @@ export function pruneBundles(input: {
     for (const name of ready.slice(0, Math.max(0, ready.length - retainedBundleCount)))
       remove(name, result.removed)
     for (const name of unfinished) remove(name, result.abandoned)
-    if (result.removed.length + result.abandoned.length > 0) syncPath(directory)
-  } catch (error) {
+    if (result.removed.length + result.abandoned.length > 0) {
+      syncingArchive = true
+      syncPath(directory)
+    }
+  } catch (cause) {
+    const error = syncingArchive
+      ? attachProgress(cause, { ...result, archiveSyncFailed: true })
+      : cause
     try {
       lock.release()
     } catch (cleanupError) {
@@ -72,6 +88,10 @@ export function pruneBundles(input: {
     }
     throw error
   }
-  lock.release()
+  try {
+    lock.release()
+  } catch (error) {
+    throw attachProgress(error, { ...result, archiveSyncFailed: false })
+  }
   return result
 }

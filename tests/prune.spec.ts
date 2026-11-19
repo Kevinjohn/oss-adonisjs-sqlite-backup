@@ -11,7 +11,14 @@ import { internalHooks } from '../src/internal_hooks.js'
 import { acquireLock } from '../src/lock.js'
 import { pruneBundles } from '../src/prune.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
-import { makeLiveDatabase, startChild, stopChild, createTemporaryRoot } from './helpers.js'
+import type { PruneProgress } from '../src/types.js'
+import {
+  failDirectorySync,
+  makeLiveDatabase,
+  startChild,
+  stopChild,
+  createTemporaryRoot,
+} from './helpers.js'
 
 test.group('pruneBundles', (group) => {
   let root: string
@@ -113,12 +120,14 @@ test.group('pruneBundles', (group) => {
     assert.deepEqual(pruneBundles({ directory, keep: 1 }).removed, [oldest])
   })
 
-  const pruneWithFailures = (primary?: { error: unknown }) => {
+  const pruneWithFailures = (
+    primary?: { error: unknown },
+    rollbackError = new Error('lock rollback failed')
+  ) => {
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
     }
     const originalExec = prototype.exec
-    const rollbackError = new Error('lock rollback failed')
     prototype.exec = function (sql) {
       if (this.name === join(directory, '.backup.lock') && sql === 'ROLLBACK') throw rollbackError
       return originalExec.call(this, sql)
@@ -179,6 +188,58 @@ test.group('pruneBundles', (group) => {
     mkdirSync(directory)
     const { failure, rollbackError } = pruneWithFailures()
     assert.strictEqual(failure, rollbackError)
+  })
+
+  test('retains observed removals and the original archive sync error', async ({ assert }) => {
+    const [oldest, newest] = await createMany(2)
+    const syncError = new Error('final archive sync failed')
+    const restoreSync = failDirectorySync(directory, syncError)
+    let failure: unknown
+    try {
+      pruneBundles({ directory, keep: 1 })
+    } catch (error) {
+      failure = error
+    } finally {
+      restoreSync()
+    }
+    assert.strictEqual(failure, syncError)
+    assert.deepEqual((failure as { pruneProgress: PruneProgress }).pruneProgress, {
+      removed: [oldest],
+      abandoned: [],
+      failed: [],
+      archiveSyncFailed: true,
+    })
+    assert.isFalse(existsSync(join(directory, oldest!)))
+    assert.isTrue(existsSync(join(directory, newest!)))
+    acquireLock(directory).release()
+  })
+
+  test('retains removals and per-item errors after lock release fails', async ({ assert }) => {
+    const [oldest, newest] = await createMany(2)
+    const abandoned = 'bak-utc-20010101-000000-001'
+    const interrupted = 'bak-utc-20010101-000000-002'
+    mkdirSync(join(directory, abandoned))
+    mkdirSync(join(directory, interrupted))
+    internalHooks.step = (step, name) => {
+      if (step === 'prune:unpublished' && name === interrupted) throw new Error('remove failed')
+    }
+    const frozenRollbackError = Object.freeze(new Error('lock rollback failed'))
+    try {
+      const { failure } = pruneWithFailures(undefined, frozenRollbackError)
+      assert.strictEqual((failure as Error).cause, frozenRollbackError)
+      assert.deepEqual((failure as { pruneProgress: PruneProgress }).pruneProgress, {
+        removed: [oldest],
+        abandoned: [abandoned],
+        failed: [{ name: interrupted, reason: 'Error: remove failed' }],
+        archiveSyncFailed: false,
+      })
+      assert.isFalse(existsSync(join(directory, oldest!)))
+      assert.isTrue(existsSync(join(directory, newest!)))
+      assert.isFalse(existsSync(join(directory, abandoned)))
+      assert.isTrue(existsSync(join(directory, interrupted)))
+    } finally {
+      delete internalHooks.step
+    }
   })
 
   test('configured prune protects a live file in an unfinished bundle', ({ assert }) => {
