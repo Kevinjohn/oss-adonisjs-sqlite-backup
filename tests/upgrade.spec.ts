@@ -344,12 +344,30 @@ test.group('db:upgrade', (group) => {
     }
   })
 
-  test('exits non-zero when a migration fails', async ({ assert }) => {
+  test('keeps a usable pre-upgrade snapshot when a migration fails', async ({ assert }) => {
+    const seed = openDatabase(join(root, 'live.db'))
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY, name TEXT)')
+      seed.exec("INSERT INTO villains (id, name) VALUES (1, 'known row')")
+    } finally {
+      seed.close()
+    }
     writeMigration(root, '001_broken', "await this.db.rawQuery('SELECT * FROM no_such_table')")
     const booted = await bootApp(root)
     app = booted.app
     const command = await booted.upgrade()
     assert.isAbove(command.exitCode ?? 0, 0)
+    assert.include(command.error?.message, 'no such table: no_such_table')
+    const bundle = verifyBundle(`${booted.live}.backups`)
+    assert.include(booted.logs(), `Pre-upgrade backup written ${bundle.path}`)
+    const database = openDatabase(join(bundle.path, 'db.sqlite'), { readonly: true })
+    try {
+      assert.deepEqual(database.prepare('SELECT id, name FROM villains').all(), [
+        { id: 1, name: 'known row' },
+      ])
+    } finally {
+      database.close()
+    }
   })
 
   test('refuses a connection that is not better-sqlite3', async ({ assert }) => {
