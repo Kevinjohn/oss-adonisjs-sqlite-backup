@@ -4,7 +4,7 @@ import Database from 'better-sqlite3'
 import { linkSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { acquireCreateLock, acquireLock } from '../src/lock.js'
-import { startChild, stopChild, tempRoot } from './helpers.js'
+import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 test.group('Directory lock', () => {
   test('rejects unsupported timeout before touching the lock path', ({ assert }) => {
@@ -12,7 +12,7 @@ test.group('Directory lock', () => {
   })
 
   test('damaged multiply linked lock cannot truncate its alias', ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const alias = join(root, 'alias')
     const lockPath = join(root, '.backup.lock')
     try {
@@ -25,7 +25,7 @@ test.group('Directory lock', () => {
     }
   })
   test('a second holder in the same process is refused until release', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     try {
       const first = acquireLock(root)
       assert.throws(() => acquireLock(root), /locked/)
@@ -40,7 +40,7 @@ test.group('Directory lock', () => {
   test('release attempts close after rollback fails and can be retried after close fails', ({
     assert,
   }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
       close: (this: { name: string }) => void
@@ -83,7 +83,7 @@ test.group('Directory lock', () => {
   })
 
   test('release retains falsy rollback and close failures', ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
       close: (this: { name: string }) => void
@@ -121,7 +121,7 @@ test.group('Directory lock', () => {
   })
 
   test('a single falsy rollback failure is still thrown after close succeeds', ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
     }
@@ -150,7 +150,7 @@ test.group('Directory lock', () => {
   })
 
   test('failed acquisition retains a non-Error primary and close failure', ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
       close: (this: { name: string }) => void
@@ -191,7 +191,7 @@ test.group('Directory lock', () => {
   })
 
   test('failed acquisition attaches native close failure to the primary error', ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
       close: (this: { name: string }) => void
@@ -236,7 +236,7 @@ test.group('Directory lock', () => {
   test('async acquisition preserves a busy error when contender close fails', async ({
     assert,
   }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const holder = acquireLock(root)
     const prototype = Database.prototype as {
       exec: (this: { name: string }, sql: string) => unknown
@@ -316,7 +316,7 @@ test.group('Directory lock', () => {
   }).timeout(20_000)
 
   test('another process holding the lock blocks; its death releases it', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const holder = await startChild('lock', root)
     try {
       try {
@@ -334,7 +334,7 @@ test.group('Directory lock', () => {
   }).timeout(20_000)
 
   test('lockTimeoutMs waits for the holder', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const holder = await startChild('lock', root, '300')
     try {
       const started = Date.now()
@@ -347,7 +347,7 @@ test.group('Directory lock', () => {
   }).timeout(20_000)
 
   test('async create wait yields for another process and bounds refusal', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     const holder = await startChild('lock', root, '300')
     try {
       const started = Date.now()
@@ -365,7 +365,7 @@ test.group('Directory lock', () => {
     assert,
   }) => {
     assert.throws(() => acquireLock('/nonexistent/dir/for/lock'), /cannot open lock file/)
-    const { root, cleanup } = tempRoot()
+    const { root, cleanup } = createTemporaryRoot()
     try {
       writeFileSync(join(root, '.backup.lock'), 'x'.repeat(4096))
       const held = acquireLock(root)

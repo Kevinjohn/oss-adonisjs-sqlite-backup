@@ -43,7 +43,7 @@ flowchart TD
     A["DbBackup.run prune case"] --> B["SqliteBackup.prune({keep})"]
     B --> C["pruneBundles"]
     C --> D["Validate keep, assertDirectory, acquireLock"]
-    D --> E["bundleDirectories and split READY from unfinished"]
+    D --> E["listBundleDirectoryNames and split READY from unfinished"]
     E --> F["Select older READY rows and all unfinished rows"]
     F --> G["unlink READY, syncPath, then rmSync directory"]
     G --> H["Collect removed, abandoned and failed results"]

@@ -19,9 +19,9 @@ import { internalHooks } from '../src/internal_hooks.js'
 import { acquireLock } from '../src/lock.js'
 import { openDatabase } from '../src/native.js'
 import { prepareRestore } from '../src/restore.js'
-import { makeLiveDatabase, tempRoot } from './helpers.js'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
-const codeOf = async (fn: () => unknown) => {
+const readBackupErrorCode = async (fn: () => unknown) => {
   try {
     await fn()
   } catch (error) {
@@ -37,7 +37,7 @@ test.group('re-review', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     return () => {
@@ -57,7 +57,7 @@ test.group('re-review', (group) => {
     const appPath = join(root, 'app', 'tmp', 'db.sqlite3')
     symlinkSync(join(data, 'db.sqlite3'), appPath) // the data file is lost: the link dangles
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(data, 'db.sqlite3'), livePath: appPath })
       ),
       'E_BACKUP_UNSAFE'
@@ -66,7 +66,7 @@ test.group('re-review', (group) => {
     const hop = join(root, 'app', 'hop')
     symlinkSync('tmp/db.sqlite3', hop)
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(data, 'db.sqlite3'), livePath: hop })
       ),
       'E_BACKUP_UNSAFE'
@@ -76,7 +76,7 @@ test.group('re-review', (group) => {
     symlinkSync(join(root, 'loop-b'), join(root, 'loop-a'))
     symlinkSync(join(root, 'loop-a'), join(root, 'loop-b'))
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 's.db'), livePath: join(root, 'loop-a') })
       ),
       'E_BACKUP_UNSAFE'
@@ -93,7 +93,7 @@ test.group('re-review', (group) => {
     chmodSync(locked, 0o500)
     try {
       assert.equal(
-        await codeOf(() =>
+        await readBackupErrorCode(() =>
           prepareRestore({ directory, target: join(locked, 's.db'), livePath: live })
         ),
         'raw:EACCES'
@@ -108,7 +108,7 @@ test.group('re-review', (group) => {
     const b = await createBundle(prepared({ livePath: live, directory }))
     for (const target of [join(b.path, 'extra.db'), join(directory, 'staged.db')]) {
       assert.equal(
-        await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+        await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
         'E_BACKUP_UNSAFE'
       )
       assert.isFalse(existsSync(target))
@@ -125,7 +125,7 @@ test.group('re-review', (group) => {
     }
     try {
       assert.equal(
-        await codeOf(() => createBundle(prepared({ livePath: live, directory }))),
+        await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
         'raw:EACCES'
       )
     } finally {
@@ -142,7 +142,7 @@ test.group('re-review', (group) => {
     makeLiveDatabase(inside).close()
     symlinkSync(inside, live)
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
       'E_BACKUP_UNSAFE'
     )
   })
@@ -155,7 +155,7 @@ test.group('re-review', (group) => {
     db.close()
     writeFileSync(join(directory, '.backup.lock'), readFileSync(sample).subarray(0, 512))
     const held = acquireLock(directory)
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_LOCKED')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCKED')
     held.release()
   })
 
@@ -173,7 +173,7 @@ test.group('re-review', (group) => {
         symlinkSync(victim, lockPath)
       }
     }
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
     assert.equal(readFileSync(victim, 'utf8'), 'keep me')
     // A FIFO swapped in is refused at once instead of blocking the open.
     unlinkSync(lockPath)
@@ -184,7 +184,7 @@ test.group('re-review', (group) => {
         execFileSync('mkfifo', [lockPath])
       }
     }
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
   }).timeout(10_000)
 
   test('P3: prune unpublishing between selection and the READY check is NOT_FOUND', async ({
@@ -198,6 +198,6 @@ test.group('re-review', (group) => {
         unlinkSync(join(b.path, 'READY'))
       }
     }
-    assert.equal(await codeOf(() => verifyBundle(directory)), 'E_BACKUP_NOT_FOUND')
+    assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_NOT_FOUND')
   })
 })

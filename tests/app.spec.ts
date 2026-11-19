@@ -25,14 +25,18 @@ import {
   failDirectorySync,
   startChild,
   stopChild,
-  tempRoot,
+  createTemporaryRoot,
   within,
 } from './helpers.js'
 
+interface BootAppOptions {
+  withBackupConfig?: boolean | 'disabled'
+  backupDirectory?: string
+}
+
 async function bootApp(
   root: string,
-  withBackupConfig: boolean | 'disabled' = true,
-  backupDirectory?: string
+  { withBackupConfig = true, backupDirectory }: BootAppOptions = {}
 ) {
   const live = join(root, 'live.db')
   const ignitor = new IgnitorFactory()
@@ -76,8 +80,8 @@ async function bootApp(
 }
 
 test('refused implicit create leaves an unsafe root permission unchanged', async ({ assert }) => {
-  const { root, cleanup } = tempRoot()
-  const { app, live } = await bootApp(root, true, root)
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root, { backupDirectory: root })
   try {
     openDatabase(live).close()
     chmodSync(root, 0o755)
@@ -97,12 +101,12 @@ test('refused implicit create leaves an unsafe root permission unchanged', async
 test('create refuses a configured file root without changing its mode or bytes', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const directory = join(root, 'backup-root')
   const bytes = Buffer.from('preserve configured file')
   writeFileSync(directory, bytes, { mode: 0o644 })
   const beforeMode = statSync(directory).mode & 0o777
-  const { app, live } = await bootApp(root, true, directory)
+  const { app, live } = await bootApp(root, { backupDirectory: directory })
   try {
     openDatabase(live).close()
     const ace = await app.container.make('ace')
@@ -124,7 +128,7 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
   let app: ApplicationService
   let live: string
   group.each.setup(async () => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     ;({ app, live } = await bootApp(root))
     return async () => {
       await app.terminate()
@@ -276,8 +280,8 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
 
 test.group('provider', () => {
   test('without config/backup.ts the binding fails with a fix-it message', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
-    const { app } = await bootApp(root, false)
+    const { root, cleanup } = createTemporaryRoot()
+    const { app } = await bootApp(root, { withBackupConfig: false })
     try {
       await assert.rejects(() => app.container.make('sqlite.backup'), /node ace configure/)
       assert.isFunction(SqliteBackupProvider)
@@ -292,7 +296,7 @@ test.group('WAL: backup in its own process while the app writes', (group) => {
   let root: string
   let cleanup: () => void
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     return () => cleanup()
   })
 
@@ -391,8 +395,8 @@ test.group('WAL: backup in its own process while the app writes', (group) => {
 test('disabled provider boots; commands recover from an explicit directory and reject directory on writers', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
-  const { app, live } = await bootApp(root, 'disabled')
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root, { withBackupConfig: 'disabled' })
   try {
     const db = openDatabase(live)
     db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
@@ -429,7 +433,7 @@ test('disabled provider boots; commands recover from an explicit directory and r
 }).timeout(30_000)
 
 test('command reports the original create failure and its cleanup failure', async () => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   try {
     const db = openDatabase(live)
@@ -455,7 +459,7 @@ test('command reports the original create failure and its cleanup failure', asyn
 test('prune reports observed removals and earlier failures when archive sync fails', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   const directory = join(root, 'backups')
   try {
@@ -496,7 +500,7 @@ test('prune reports observed removals and earlier failures when archive sync fai
 }).timeout(30_000)
 
 test('command reports every native error from failed lock acquisition', async () => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   const prototype = Database.prototype as {
     exec: (this: { name: string }, sql: string) => unknown
@@ -540,7 +544,7 @@ test('command reports every native error from failed lock acquisition', async ()
 }).timeout(30_000)
 
 test('command reports rollback and close failures without hiding the create error', async () => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   const prototype = Database.prototype as {
     exec: (this: { name: string }, sql: string) => unknown
@@ -599,7 +603,7 @@ test('command reports rollback and close failures without hiding the create erro
 }).timeout(30_000)
 
 test('command reports a falsy temporary cleanup failure', async () => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   try {
     const db = openDatabase(live)

@@ -17,9 +17,9 @@ import { openDatabase } from '../src/native.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
-import { makeLiveDatabase, tempRoot } from './helpers.js'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
-const codeOf = async (fn: () => unknown) => {
+const readBackupErrorCode = async (fn: () => unknown) => {
   try {
     await fn()
   } catch (error) {
@@ -34,7 +34,7 @@ test.group('host adoption contracts', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'backups')
     return () => {
@@ -79,7 +79,7 @@ test.group('host adoption contracts', (group) => {
       assert.deepEqual(database.prepare('SELECT count(*) AS n FROM items').get(), { n: 201 })
       delete internalHooks.step
       assert.equal(
-        await codeOf(() => createBundle({ livePath: live, directory })),
+        await readBackupErrorCode(() => createBundle({ livePath: live, directory })),
         'E_BACKUP_SOURCE'
       )
     } finally {
@@ -88,7 +88,7 @@ test.group('host adoption contracts', (group) => {
     const memory = openDatabase(':memory:')
     try {
       assert.equal(
-        await codeOf(() => createBundle({ source: { database: memory }, directory })),
+        await readBackupErrorCode(() => createBundle({ source: { database: memory }, directory })),
         'E_BACKUP_SOURCE'
       )
     } finally {
@@ -101,11 +101,14 @@ test.group('host adoption contracts', (group) => {
   }) => {
     makeLiveDatabase(live).close()
     assert.equal(
-      await codeOf(() => createBundle({ livePath: live, directory })),
+      await readBackupErrorCode(() => createBundle({ livePath: live, directory })),
       'E_BACKUP_NOT_FOUND'
     )
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_NOT_FOUND')
-    assert.equal(await codeOf(() => pruneBundles({ directory, keep: 1 })), 'E_BACKUP_NOT_FOUND')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_NOT_FOUND')
+    assert.equal(
+      await readBackupErrorCode(() => pruneBundles({ directory, keep: 1 })),
+      'E_BACKUP_NOT_FOUND'
+    )
     assert.isFalse(existsSync(directory))
     prepareDirectory(directory)
     assert.equal(statSync(directory).mode & 0o777, 0o700)
@@ -117,7 +120,7 @@ test.group('host adoption contracts', (group) => {
         () => pruneBundles({ directory, keep: 1 }),
         () => prepareRestore({ livePath: live, directory, target: join(root, 'stage.db') }),
       ])
-        assert.equal(await codeOf(operation), 'E_BACKUP_UNSAFE')
+        assert.equal(await readBackupErrorCode(operation), 'E_BACKUP_UNSAFE')
     }
     prepareDirectory(directory)
     assert.equal(statSync(directory).mode & 0o777, 0o700)
@@ -125,11 +128,11 @@ test.group('host adoption contracts', (group) => {
     assert.equal(verifyBundle(directory, result.name).name, result.name)
     rmSync(directory, { recursive: true })
     assert.equal(
-      await codeOf(() => createBundle({ livePath: live, directory })),
+      await readBackupErrorCode(() => createBundle({ livePath: live, directory })),
       'E_BACKUP_NOT_FOUND'
     )
     writeFileSync(directory, 'not a folder')
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_UNSAFE')
   })
 
   test('disabled service refuses configured operations and allows explicit recovery directories', async ({
@@ -153,7 +156,7 @@ test.group('host adoption contracts', (group) => {
       () => backup.prepareRestore({ target: join(root, 'disabled.db') }),
       () => backup.prune(),
     ]) {
-      assert.equal(await codeOf(operation), 'E_BACKUP_DISABLED')
+      assert.equal(await readBackupErrorCode(operation), 'E_BACKUP_DISABLED')
     }
     assert.equal(backup.list(directory)[0]!.createdAt, made.manifest.createdAt)
     assert.equal(backup.verify(made.name, directory).name, made.name)
@@ -171,10 +174,10 @@ test.group('host adoption contracts', (group) => {
       connections: { sqlite: { client: 'better-sqlite3', connection: { filename: live } } },
     }
     const backup = new SqliteBackup(defineConfig({ directory }), database)
-    assert.equal(await codeOf(() => backup.checkSource()), 'E_BACKUP_SOURCE')
+    assert.equal(await readBackupErrorCode(() => backup.checkSource()), 'E_BACKUP_SOURCE')
     assert.isFalse(existsSync(live))
     writeFileSync(live, 'not sqlite')
-    assert.equal(await codeOf(() => backup.checkSource()), 'E_BACKUP_SOURCE')
+    assert.equal(await readBackupErrorCode(() => backup.checkSource()), 'E_BACKUP_SOURCE')
     rmSync(live)
     makeLiveDatabase(live).close()
     backup.checkSource()
@@ -222,9 +225,9 @@ test.group('host adoption contracts', (group) => {
     ]) {
       chmodSync(manifest, 0o600)
       writeFileSync(manifest, JSON.stringify({ ...data, migrations: replacement }))
-      assert.equal(await codeOf(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
+      assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
       assert.equal(
-        await codeOf(() =>
+        await readBackupErrorCode(() =>
           prepareRestore({ directory, livePath: live, target: join(root, 'invalid.db') })
         ),
         'E_BACKUP_INVALID'
@@ -293,21 +296,21 @@ test.group('host adoption contracts', (group) => {
       assert.deepEqual(listBundles(directory), [])
     })
     delete internalHooks.step
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_INVALID')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
     writeFileSync(join(second.path, 'manifest.json'), '{')
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_INVALID')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
     writeFileSync(
       join(second.path, 'manifest.json'),
       JSON.stringify({ ...second.manifest, createdAt: 'invalid' })
     )
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_INVALID')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
   })
 })
 
 test('recovery selects the newest READY bundle without reading older malformed manifests', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   try {
     const live = join(root, 'live.db')
     const directory = join(root, 'bundles')
@@ -335,7 +338,7 @@ test('recovery selects the newest READY bundle without reading older malformed m
 test('borrowed BigInt handles read the main mixed-case journal without changing global settings', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const live = join(root, 'live.db')
   const directory = join(root, 'bundles')
   const database = makeLiveDatabase(live) as ReturnType<typeof makeLiveDatabase> & {
@@ -362,7 +365,7 @@ test('borrowed BigInt handles read the main mixed-case journal without changing 
     })
     database.close()
     assert.equal(
-      await codeOf(() => createBundle({ source: { database }, directory })),
+      await readBackupErrorCode(() => createBundle({ source: { database }, directory })),
       'E_BACKUP_SOURCE'
     )
   } finally {
@@ -377,7 +380,7 @@ test('borrowed BigInt handles read the main mixed-case journal without changing 
 test('manifest metadata is validated and journal schema failures retain invalid-bundle meaning', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   try {
     const live = join(root, 'live.db')
     const directory = join(root, 'bundles')
@@ -402,10 +405,10 @@ test('manifest metadata is validated and journal schema failures retain invalid-
     ]
     for (const migrations of badMetadata) {
       writeFileSync(manifest, JSON.stringify({ ...result.manifest, migrations }))
-      assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_INVALID')
-      assert.equal(await codeOf(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
+      assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
+      assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
       assert.equal(
-        await codeOf(() =>
+        await readBackupErrorCode(() =>
           prepareRestore({ directory, livePath: live, target: join(root, 'stage.db') })
         ),
         'E_BACKUP_INVALID'
@@ -413,14 +416,14 @@ test('manifest metadata is validated and journal schema failures retain invalid-
       assert.isFalse(existsSync(join(root, 'stage.db')))
     }
     writeFileSync(manifest, JSON.stringify({ ...result.manifest, createdAt: 'January 1, 2030' }))
-    assert.equal(await codeOf(() => listBundles(directory)), 'E_BACKUP_INVALID')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
     writeFileSync(
       manifest,
       JSON.stringify({ ...result.manifest, migrations: { table: 'no_id', count: 0, last: null } })
     )
-    assert.equal(await codeOf(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
+    assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_INVALID')
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, livePath: live, target: join(root, 'stage.db') })
       ),
       'E_BACKUP_INVALID'
@@ -434,7 +437,7 @@ test('manifest metadata is validated and journal schema failures retain invalid-
 test('restore refuses absent live sidecars before copying and leaves the source usable', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   try {
     const live = join(root, 'live.db')
     const directory = join(root, 'bundles')
@@ -445,7 +448,7 @@ test('restore refuses absent live sidecars before copying and leaves the source 
       const target = live + suffix
       assert.isFalse(existsSync(target))
       assert.equal(
-        await codeOf(() => prepareRestore({ directory, livePath: live, target })),
+        await readBackupErrorCode(() => prepareRestore({ directory, livePath: live, target })),
         'E_BACKUP_UNSAFE'
       )
       assert.isFalse(existsSync(target))
@@ -464,7 +467,7 @@ test('restore refuses absent live sidecars before copying and leaves the source 
 test('explicit recovery directory takes precedence over an enabled configured directory', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   try {
     const live = join(root, 'live.db')
     const directory = join(root, 'configured')
@@ -500,7 +503,7 @@ test('explicit recovery directory takes precedence over an enabled configured di
 test('create rejects unsupported migration metadata without publishing a READY bundle', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   try {
     const live = join(root, 'live.db')
     const directory = join(root, 'bundles')

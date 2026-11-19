@@ -3,7 +3,7 @@ import { openDatabase, type NativeDatabase } from './native.js'
 import type { BundleManifest } from './types.js'
 
 /** Capture the complete migration journal in its application order. Table names are quoted. */
-export function migrationRows(
+export function readMigrationRows(
   database: NativeDatabase,
   table: string
 ): Record<string, unknown>[] | undefined {
@@ -26,7 +26,7 @@ export function assertMigrations(
 ): void {
   const database = openDatabase(path, { fileMustExist: true, readonly: true })
   try {
-    const rows = migrationRows(database, expected.table)
+    const rows = readMigrationRows(database, expected.table)
     if (!rows || rows.length !== expected.count || (rows.at(-1)?.name ?? null) !== expected.last) {
       throw new BackupException(
         'E_BACKUP_INVALID',

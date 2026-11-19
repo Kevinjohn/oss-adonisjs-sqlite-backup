@@ -8,7 +8,7 @@ import { createBundle, verifyBundle } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
 import { openDatabase } from '../src/native.js'
 import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.js'
-import { countItems, makeLiveDatabase, tempRoot } from './helpers.js'
+import { countItems, makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
 function configured(config: unknown) {
   return {
@@ -26,7 +26,7 @@ const sqlite = (filename: string, max = 1) => ({
 test.group('operatorDatabasePath', (group) => {
   let root: string
   group.each.setup(() => {
-    const temp = tempRoot()
+    const temp = createTemporaryRoot()
     root = temp.root
     return temp.cleanup
   })
@@ -135,7 +135,7 @@ function replica(db: Database) {
 test.group('withOperatorDatabase', (group) => {
   let root: string
   group.each.setup(() => {
-    const temp = tempRoot()
+    const temp = createTemporaryRoot()
     root = temp.root
     return temp.cleanup
   })

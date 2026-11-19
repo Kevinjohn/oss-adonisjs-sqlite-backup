@@ -12,7 +12,13 @@ import { acquireLock } from '../src/lock.js'
 import { pruneBundles } from '../src/prune.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
 import type { PruneProgress } from '../src/types.js'
-import { failDirectorySync, makeLiveDatabase, startChild, stopChild, tempRoot } from './helpers.js'
+import {
+  failDirectorySync,
+  makeLiveDatabase,
+  startChild,
+  stopChild,
+  createTemporaryRoot,
+} from './helpers.js'
 
 test.group('pruneBundles', (group) => {
   let root: string
@@ -20,7 +26,7 @@ test.group('pruneBundles', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     makeLiveDatabase(live).close()

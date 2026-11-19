@@ -1,16 +1,17 @@
 import { chmodSync, constants, copyFileSync, lstatSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { assertMatchesManifest, readManifest, selectBundle } from './bundles.js'
+import { assertMatchesManifest, readManifest, requireSelectedBundle } from './bundles.js'
 import { assertDirectory } from './directory.js'
 import { BackupException } from './errors.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { DATABASE, READY } from './names.js'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 import { isWithin, normalizeConfiguredSqliteFilename } from './source.js'
 
 /** Exists in any form, including a dangling symlink (unlike existsSync). */
-const present = (path: string) => lstatSync(path, { throwIfNoEntry: false }) !== undefined
+const existsIncludingDanglingSymlink = (path: string) =>
+  lstatSync(path, { throwIfNoEntry: false }) !== undefined
 
 /**
  * Stage a verified copy of a bundle at `target`. Never touches the live database and never swaps
@@ -23,7 +24,7 @@ export function prepareRestore(input: {
   livePath: string
   name?: string
 }): { bundle: string; target: string } {
-  // realPath drops a trailing slash after a missing segment, and the as-given check below would
+  // resolveFilesystemPath drops a trailing slash after a missing segment, and the as-given check below would
   // follow a dangling symlink through it.
   if (input.target.endsWith('/')) {
     throw new BackupException(
@@ -31,16 +32,16 @@ export function prepareRestore(input: {
       `restore target ${input.target} names a folder; give the file to create`
     )
   }
-  const target = realPath(input.target)
+  const target = resolveFilesystemPath(input.target)
   if (normalizeConfiguredSqliteFilename(target, 'better-sqlite3') !== target) {
     throw new BackupException(
       'E_BACKUP_UNSAFE',
       'restore target changes when opened by the SQLite verification driver'
     )
   }
-  const livePath = realPath(input.livePath)
-  const directory = realPath(input.directory)
-  assertDirectory(directory, true)
+  const livePath = resolveFilesystemPath(input.livePath)
+  const directory = resolveFilesystemPath(input.directory)
+  assertDirectory(directory, { requirePrivateRoot: true })
   if ([livePath, `${livePath}-wal`, `${livePath}-shm`, `${livePath}-journal`].includes(target)) {
     throw new BackupException(
       'E_BACKUP_UNSAFE',
@@ -50,7 +51,7 @@ export function prepareRestore(input: {
   // Checked as given too: a dangling symlink at the target is present even though its end is not.
   const names = [target, input.target].flatMap((t) => [t, `${t}-wal`, `${t}-shm`, `${t}-journal`])
   for (const path of names) {
-    if (present(path)) {
+    if (existsIncludingDanglingSymlink(path)) {
       throw new BackupException('E_BACKUP_UNSAFE', `restore target ${path} already exists`)
     }
   }
@@ -63,7 +64,7 @@ export function prepareRestore(input: {
   if (isWithin(directory, target)) {
     throw new BackupException('E_BACKUP_UNSAFE', `restore target ${target} is in the backup folder`)
   }
-  const bundle = selectBundle(directory, input.name)
+  const bundle = requireSelectedBundle(directory, input.name)
   const manifest = readManifest(bundle)
   const source = join(bundle.path, DATABASE)
   internalHooks.step?.('restore:checked', target)
@@ -78,10 +79,10 @@ export function prepareRestore(input: {
       })
     }
     // Only a vanished publication is missing. A READY bundle with a missing database is damaged.
-    if (code === 'ENOENT' && !present(join(bundle.path, READY))) {
+    if (code === 'ENOENT' && !existsIncludingDanglingSymlink(join(bundle.path, READY))) {
       throw new BackupException('E_BACKUP_NOT_FOUND', `bundle ${bundle.name} was pruned`, { cause })
     }
-    if (code === 'ENOENT' && !present(source)) {
+    if (code === 'ENOENT' && !existsIncludingDanglingSymlink(source)) {
       throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} database is missing`, {
         cause,
       })
@@ -90,23 +91,27 @@ export function prepareRestore(input: {
   }
   // Where the copy landed, read at once: a folder on the way swapped for a symlink during the copy
   // moves it elsewhere, and may be swapped back before the checks below.
-  const made = lstatSync(target, { throwIfNoEntry: false })
-  const landed = realPath(target)
+  const createdFileStat = lstatSync(target, { throwIfNoEntry: false })
+  const resolvedTargetPath = resolveFilesystemPath(target)
   internalHooks.step?.('restore:copied', target)
-  const ours = (path: string) => {
-    const now = lstatSync(path, { throwIfNoEntry: false })
+  const matchesCreatedRestoreFile = (path: string) => {
+    const currentFileStat = lstatSync(path, { throwIfNoEntry: false })
     // Inode numbers are reused once a file is deleted, so a replacement file can share one;
     // its creation time still differs (on filesystems that record it).
     return (
-      made !== undefined &&
-      now?.ino === made.ino &&
-      now.dev === made.dev &&
-      now.birthtimeMs === made.birthtimeMs
+      createdFileStat !== undefined &&
+      currentFileStat?.ino === createdFileStat.ino &&
+      currentFileStat.dev === createdFileStat.dev &&
+      currentFileStat.birthtimeMs === createdFileStat.birthtimeMs
     )
   }
   try {
-    /* c8 ignore next -- `made` is missing only if swapped back within microseconds of the copy */
-    if (!made || landed !== target || realPath(target) !== target) {
+    /* c8 ignore next -- `createdFileStat` is missing only if swapped back within microseconds of the copy */
+    if (
+      !createdFileStat ||
+      resolvedTargetPath !== target ||
+      resolveFilesystemPath(target) !== target
+    ) {
       throw new BackupException('E_BACKUP_UNSAFE', `restore target ${target} moved during the copy`)
     }
     chmodSync(target, 0o600)
@@ -116,7 +121,8 @@ export function prepareRestore(input: {
   } catch (error) {
     // Remove only the file this restore created: where the path leads now and where it landed.
     try {
-      for (const path of new Set([target, landed])) if (ours(path)) rmSync(path, { force: true })
+      for (const path of new Set([target, resolvedTargetPath]))
+        if (matchesCreatedRestoreFile(path)) rmSync(path, { force: true })
     } catch (cleanupError) {
       // The verification failure is the finding; the failed removal rides along as in create.
       if (error instanceof Error)

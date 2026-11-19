@@ -1,7 +1,7 @@
 import { openDatabase, type NativeDatabase } from './native.js'
 
 /** Full `integrity_check` and `foreign_key_check`. Returns the first problem, or null when clean. */
-export function checkDatabase(path: string): string | null {
+export function readDatabaseIntegrityProblem(path: string): string | null {
   let db: NativeDatabase
   try {
     db = openDatabase(path, { fileMustExist: true, readonly: true })

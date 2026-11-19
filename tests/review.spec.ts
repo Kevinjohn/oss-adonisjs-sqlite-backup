@@ -24,15 +24,21 @@ import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { defineConfig } from '../src/define_config.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { acquireLock } from '../src/lock.js'
-import { bundleName, parseBundleName } from '../src/names.js'
-import { sha256File } from '../src/fs.js'
+import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.js'
+import { hashFileSha256 } from '../src/fs.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
-import { makeLiveDatabase, overwrite, startChild, stopChild, tempRoot } from './helpers.js'
+import {
+  makeLiveDatabase,
+  overwrite,
+  startChild,
+  stopChild,
+  createTemporaryRoot,
+} from './helpers.js'
 
 /** The error code thrown by `fn`, 'raw:<code>' for a non-package error, or 'no error'. */
-const codeOf = async (fn: () => unknown) => {
+const readBackupErrorCode = async (fn: () => unknown) => {
   try {
     await fn()
   } catch (error) {
@@ -55,7 +61,7 @@ test.group('review findings', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     return () => {
@@ -67,22 +73,26 @@ test.group('review findings', (group) => {
   test('F1: a file or symlink at the chosen name is refused and left alone', async ({ assert }) => {
     makeLiveDatabase(live).close()
     mkdirSync(directory)
-    writeFileSync(join(directory, bundleName(T)), 'not ours')
+    writeFileSync(join(directory, requireFormattedBundleName(T)), 'not ours')
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory, now: () => T }))),
+      await readBackupErrorCode(() =>
+        createBundle(prepared({ livePath: live, directory, now: () => T }))
+      ),
       'E_BACKUP_UNSAFE'
     )
-    assert.equal(readFileSync(join(directory, bundleName(T)), 'utf8'), 'not ours')
+    assert.equal(readFileSync(join(directory, requireFormattedBundleName(T)), 'utf8'), 'not ours')
 
     const outside = join(root, 'outside')
     mkdirSync(outside)
     writeFileSync(join(outside, 'keep.txt'), 'keep')
-    symlinkSync(outside, join(directory, bundleName(T + 5)))
+    symlinkSync(outside, join(directory, requireFormattedBundleName(T + 5)))
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory, now: () => T + 5 }))),
+      await readBackupErrorCode(() =>
+        createBundle(prepared({ livePath: live, directory, now: () => T + 5 }))
+      ),
       'E_BACKUP_UNSAFE'
     )
-    assert.isTrue(lstatSync(join(directory, bundleName(T + 5))).isSymbolicLink())
+    assert.isTrue(lstatSync(join(directory, requireFormattedBundleName(T + 5))).isSymbolicLink())
     assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep')
   })
 
@@ -93,20 +103,22 @@ test.group('review findings', (group) => {
     const stray = join(directory, 'bak-utc-99991231-235959-999')
     mkdirSync(stray, { recursive: true })
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory, now: () => T }))),
+      await readBackupErrorCode(() =>
+        createBundle(prepared({ livePath: live, directory, now: () => T }))
+      ),
       'E_BACKUP_UNSAFE'
     )
     assert.isTrue(existsSync(stray))
     rmSync(stray, { recursive: true })
 
-    assert.throws(() => bundleName(Date.UTC(10000, 0, 1)))
-    assert.throws(() => parseBundleName('bak-utc-20261399-000000-000'), /not a bundle name/)
+    assert.throws(() => requireFormattedBundleName(Date.UTC(10000, 0, 1)))
+    assert.throws(() => requireBundleTimestamp('bak-utc-20261399-000000-000'), /not a bundle name/)
     mkdirSync(join(directory, 'bak-utc-20261332-000000-000'))
     const created = await createBundle(prepared({ livePath: live, directory, now: () => T }))
-    assert.equal(created.name, bundleName(T))
+    assert.equal(created.name, requireFormattedBundleName(T))
     assert.deepEqual(
       listBundles(directory).map((b) => b.name),
-      [bundleName(T)]
+      [requireFormattedBundleName(T)]
     )
     assert.deepEqual(pruneBundles({ directory, keep: 1 }).abandoned, [])
     assert.isTrue(existsSync(join(directory, 'bak-utc-20261332-000000-000')))
@@ -122,7 +134,7 @@ test.group('review findings', (group) => {
     const missingLive = join(liveDir, 'app.db')
     symlinkSync(liveDir, join(root, 'alias'))
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'alias', 'app.db'), livePath: missingLive })
       ),
       'E_BACKUP_UNSAFE'
@@ -141,7 +153,7 @@ test.group('review findings', (group) => {
     for (let left = size; left > 0; left -= zeros.length) {
       expected.update(left >= zeros.length ? zeros : zeros.subarray(0, left))
     }
-    assert.equal(sha256File(big), expected.digest('hex'))
+    assert.equal(hashFileSha256(big), expected.digest('hex'))
   }).timeout(120_000)
 
   test('F5: raw errors become BackupExceptions; a damaged lock file is recovered', async ({
@@ -149,7 +161,7 @@ test.group('review findings', (group) => {
   }) => {
     writeFileSync(live, 'x'.repeat(8192))
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
       'E_BACKUP_SOURCE'
     )
     rmSync(live)
@@ -164,13 +176,13 @@ test.group('review findings', (group) => {
     writeFileSync(join(directory, '.backup.lock'), 'x'.repeat(8192))
     const created = await createBundle(prepared({ livePath: live, directory }))
     const held = acquireLock(directory)
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_LOCKED')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCKED')
     held.release()
 
     rmSync(join(directory, '.backup.lock'))
     mkdirSync(join(directory, '.backup.lock'))
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
       'E_BACKUP_UNSAFE'
     )
     rmSync(join(directory, '.backup.lock'), { recursive: true })
@@ -178,29 +190,32 @@ test.group('review findings', (group) => {
     const precious = join(root, 'precious.txt')
     writeFileSync(precious, 'x'.repeat(8192))
     symlinkSync(precious, join(directory, '.backup.lock'))
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
     assert.equal(readFileSync(precious, 'utf8').length, 8192)
     rmSync(join(directory, '.backup.lock'))
     // Also when the outside file is a usable (empty) lock file: SQLite would lock it otherwise.
     const outside = join(root, 'outside.lock')
     writeFileSync(outside, '')
     symlinkSync(outside, join(directory, '.backup.lock'))
-    assert.equal(await codeOf(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
     rmSync(join(directory, '.backup.lock'))
 
     chmodSync(join(created.path, 'db.sqlite'), 0o600)
     unlinkSync(join(created.path, 'db.sqlite'))
-    assert.equal(await codeOf(() => verifyBundle(directory, created.name)), 'E_BACKUP_INVALID')
+    assert.equal(
+      await readBackupErrorCode(() => verifyBundle(directory, created.name)),
+      'E_BACKUP_INVALID'
+    )
   })
 
   test('F6: a symlinked bundle name is not a bundle', async ({ assert }) => {
     makeLiveDatabase(live).close()
     const real = await createBundle(prepared({ livePath: live, directory }))
-    const alias = bundleName(parseBundleName(real.name) + 1)
+    const alias = requireFormattedBundleName(requireBundleTimestamp(real.name) + 1)
     symlinkSync(real.path, join(directory, alias))
-    assert.equal(await codeOf(() => verifyBundle(directory, alias)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => verifyBundle(directory, alias)), 'E_BACKUP_UNSAFE')
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, name: alias, target: join(root, 's.db'), livePath: live })
       ),
       'E_BACKUP_UNSAFE'
@@ -213,7 +228,7 @@ test.group('review findings', (group) => {
     makeLiveDatabase(live).close()
     await createBundle(prepared({ livePath: live, directory }))
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'missing', 's.db'), livePath: live })
       ),
       'E_BACKUP_UNSAFE'
@@ -226,7 +241,7 @@ test.group('review findings', (group) => {
     const target = join(root, 's.db')
     symlinkSync(join(root, 'nowhere'), `${target}-wal`)
     assert.equal(
-      await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_UNSAFE'
     )
     assert.isFalse(existsSync(target))
@@ -241,7 +256,7 @@ test.group('review findings', (group) => {
     makeLiveDatabase(liveFile).close()
     symlinkSync(liveDir, join(root, 'alias'))
     assert.equal(
-      await codeOf(() =>
+      await readBackupErrorCode(() =>
         createBundle(prepared({ livePath: liveFile, directory: join(root, 'alias') }))
       ),
       'E_BACKUP_UNSAFE'
@@ -250,7 +265,7 @@ test.group('review findings', (group) => {
     mkdirSync(directory)
     makeLiveDatabase(odd).close()
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: odd, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: odd, directory }))),
       'E_BACKUP_UNSAFE'
     )
   })
@@ -275,7 +290,10 @@ test.group('review findings', (group) => {
         unlinkSync(join(b.path, 'db.sqlite'))
       }
     }
-    assert.equal(await codeOf(() => verifyBundle(directory, b.name)), 'E_BACKUP_NOT_FOUND')
+    assert.equal(
+      await readBackupErrorCode(() => verifyBundle(directory, b.name)),
+      'E_BACKUP_NOT_FOUND'
+    )
   })
 
   test('F11: manifest.createdAt is the real clock time even when the name is adjusted', async ({
@@ -286,7 +304,7 @@ test.group('review findings', (group) => {
     const back = await createBundle(
       prepared({ livePath: live, directory, now: () => T - 3_600_000 })
     )
-    assert.equal(back.name, bundleName(T + 1))
+    assert.equal(back.name, requireFormattedBundleName(T + 1))
     assert.equal(back.manifest.createdAt, new Date(T - 3_600_000).toISOString())
   })
 })
@@ -297,7 +315,7 @@ test.group('rules the review found untested', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     makeLiveDatabase(live).close()
@@ -315,7 +333,7 @@ test.group('rules the review found untested', (group) => {
       }
     }
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: live, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
       'E_BACKUP_INVALID'
     )
     assert.deepEqual(listBundles(directory), [])
@@ -327,7 +345,7 @@ test.group('rules the review found untested', (group) => {
       const target = join(root, 's.db')
       writeFileSync(`${target}${sidecar}`, 'stale')
       assert.equal(
-        await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+        await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
         'E_BACKUP_UNSAFE'
       )
     })
@@ -340,8 +358,8 @@ test.group('rules the review found untested', (group) => {
     const outside = join(root, 'outside')
     mkdirSync(outside)
     writeFileSync(join(outside, 'READY'), '')
-    symlinkSync(outside, join(directory, bundleName(T - 10)))
-    mkdirSync(join(directory, `x${bundleName(T - 20)}`))
+    symlinkSync(outside, join(directory, requireFormattedBundleName(T - 10)))
+    mkdirSync(join(directory, `x${requireFormattedBundleName(T - 20)}`))
     assert.deepEqual(
       listBundles(directory).map((b) => b.name),
       [real.name]
@@ -349,7 +367,7 @@ test.group('rules the review found untested', (group) => {
     const result = pruneBundles({ directory, keep: 1 })
     assert.deepEqual(result, { removed: [], abandoned: [], failed: [] })
     assert.isTrue(existsSync(join(outside, 'READY')))
-    assert.isTrue(existsSync(join(directory, `x${bundleName(T - 20)}`)))
+    assert.isTrue(existsSync(join(directory, `x${requireFormattedBundleName(T - 20)}`)))
   })
 
   test('M5: a live file nested below the backup folder is refused', async ({ assert }) => {
@@ -357,7 +375,7 @@ test.group('rules the review found untested', (group) => {
     const nested = join(directory, 'sub', 'app.db')
     makeLiveDatabase(nested).close()
     assert.equal(
-      await codeOf(() => createBundle(prepared({ livePath: nested, directory }))),
+      await readBackupErrorCode(() => createBundle(prepared({ livePath: nested, directory }))),
       'E_BACKUP_UNSAFE'
     )
   })
@@ -370,7 +388,7 @@ test.group('rules the review found untested', (group) => {
       sqliteConfig(rollback)
     )
     strict.prepareDirectory()
-    assert.equal(await codeOf(() => strict.create()), 'E_BACKUP_SOURCE')
+    assert.equal(await readBackupErrorCode(() => strict.create()), 'E_BACKUP_SOURCE')
     mkdirSync(directory, { recursive: true })
     const holder = await startChild('lock', directory, '300')
     try {
@@ -392,11 +410,14 @@ test.group('rules the review found untested', (group) => {
     const path = join(b.path, 'manifest.json')
     chmodSync(path, 0o600)
     writeFileSync(path, JSON.stringify({ ...b.manifest, format: 2 }))
-    assert.equal(await codeOf(() => verifyBundle(directory, b.name)), 'E_BACKUP_INVALID')
+    assert.equal(
+      await readBackupErrorCode(() => verifyBundle(directory, b.name)),
+      'E_BACKUP_INVALID'
+    )
   })
 
   test('M10: list and prune order by name, not by directory order', async ({ assert }) => {
-    const names = [3, 1, 4, 0, 2].map((i) => bundleName(T + i))
+    const names = [3, 1, 4, 0, 2].map((i) => requireFormattedBundleName(T + i))
     for (const name of names) {
       mkdirSync(join(directory, name), { recursive: true })
       writeFileSync(join(directory, name, 'READY'), '')
@@ -422,7 +443,9 @@ test.group('rules the review found untested', (group) => {
     unlinkSync(join(b.path, 'READY'))
     const target = join(root, 's.db')
     assert.equal(
-      await codeOf(() => prepareRestore({ directory, name: b.name, target, livePath: live })),
+      await readBackupErrorCode(() =>
+        prepareRestore({ directory, name: b.name, target, livePath: live })
+      ),
       'E_BACKUP_INVALID'
     )
     assert.isFalse(existsSync(target))
@@ -431,10 +454,10 @@ test.group('rules the review found untested', (group) => {
   test('M12: unfinished bundles do not count toward keep', async ({ assert }) => {
     const a = await createBundle(prepared({ livePath: live, directory, now: () => T }))
     const b = await createBundle(prepared({ livePath: live, directory, now: () => T + 1 }))
-    mkdirSync(join(directory, bundleName(T + 2)))
+    mkdirSync(join(directory, requireFormattedBundleName(T + 2)))
     const result = pruneBundles({ directory, keep: 2 })
     assert.deepEqual(result.removed, [])
-    assert.deepEqual(result.abandoned, [bundleName(T + 2)])
+    assert.deepEqual(result.abandoned, [requireFormattedBundleName(T + 2)])
     assert.deepEqual(
       listBundles(directory).map((x) => x.name),
       [a.name, b.name]
@@ -463,11 +486,11 @@ test.group('rules the review found untested', (group) => {
     chmodSync(manifestPath, 0o600)
     writeFileSync(
       manifestPath,
-      JSON.stringify({ ...b.manifest, sha256: sha256File(db), bytes: lstatSync(db).size })
+      JSON.stringify({ ...b.manifest, sha256: hashFileSha256(db), bytes: lstatSync(db).size })
     )
     const target = join(root, 's.db')
     assert.equal(
-      await codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_INVALID'
     )
     assert.isFalse(existsSync(target))

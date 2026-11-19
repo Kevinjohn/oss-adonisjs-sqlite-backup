@@ -1,7 +1,7 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { BackupException } from '../src/errors.js'
-import { realPath } from '../src/paths.js'
+import { resolveFilesystemPath } from '../src/paths.js'
 import { assertSafeLayout } from '../src/source.js'
 import type { PruneProgress, PruneResult } from '../src/types.js'
 
@@ -15,7 +15,7 @@ const FLAG_ACTIONS = {
   directory: ['list', 'verify', 'restore-prepare'],
 } as const satisfies Record<string, readonly (typeof ACTIONS)[number][]>
 
-const listOf = (items: readonly string[]) =>
+const formatFlagActionNames = (items: readonly string[]) =>
   items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join('')
 
 /** `node ace db:backup <create|list|verify|restore-prepare|prune>` */
@@ -56,13 +56,13 @@ export default class DbBackup extends BaseCommand {
         if (!(actions as readonly string[]).includes(this.action)) {
           throw new BackupException(
             'E_BACKUP_UNSAFE',
-            `--${flag} is only supported for ${listOf(actions)}`
+            `--${flag} is only supported for ${formatFlagActionNames(actions)}`
           )
         }
       }
       switch (this.action) {
         case 'create': {
-          assertSafeLayout(backup.livePath(), realPath(backup.config.directory))
+          assertSafeLayout(backup.livePath(), resolveFilesystemPath(backup.config.directory))
           backup.prepareDirectory()
           const result = await backup.create()
           for (const warning of result.warnings) this.logger.warning(warning)
