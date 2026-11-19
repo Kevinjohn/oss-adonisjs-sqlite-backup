@@ -44,12 +44,12 @@ Scope: lock-free bundle selection and verification.
 flowchart TD
     A["DbBackup.run verify case"] --> B["SqliteBackup.verify(name, directory)"]
     B --> C["verifyBundle"]
-    C --> D["selectBundle: parseBundleName, lstat"]
+    C --> D["requireSelectedBundle: requireBundleTimestamp, lstat"]
     D -->|Invalid name or not a directory| X["Throw E_BACKUP_UNSAFE"]
     D -->|No entry with that name| N["Throw E_BACKUP_NOT_FOUND"]
     D --> E["readManifest"]
     E --> F["assertMatchesManifest"]
-    F --> G["Check size, sha256, checkDatabase and assertMigrations"]
+    F --> G["Check size, sha256, readDatabaseIntegrityProblem and assertMigrations"]
     G --> H{"READY still published and checks pass?"}
     H -->|No| I["Throw E_BACKUP_NOT_FOUND or E_BACKUP_INVALID"]
     H -->|Yes| J["Return selected BundleLocation"]
