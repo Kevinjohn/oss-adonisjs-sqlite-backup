@@ -12,16 +12,23 @@ import {
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { assertDirectory } from './directory.js'
-import { assertMigrations, migrationRows } from './migrations.js'
-import { checkDatabase } from './checks.js'
+import { assertMigrations, readMigrationRows } from './migrations.js'
+import { readDatabaseIntegrityProblem } from './checks.js'
 import { BackupException } from './errors.js'
-import { realPath } from './paths.js'
-import { sha256File, syncPath, writeDurable } from './fs.js'
+import { resolveFilesystemPath } from './paths.js'
+import { hashFileSha256, syncPath, writeDurable } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { acquireCreateLock } from './lock.js'
-import { DATABASE, MANIFEST, READY, bundleName, isBundleName, parseBundleName } from './names.js'
+import {
+  DATABASE,
+  MANIFEST,
+  READY,
+  requireFormattedBundleName,
+  isBundleName,
+  requireBundleTimestamp,
+} from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
-import { assertSafeLayout, borrowedSourcePath, openOwnedSource } from './source.js'
+import { assertSafeLayout, requireBorrowedSourcePath, openOwnedSource } from './source.js'
 import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.js'
 
 /** A clock-step allowance: a newest bundle further ahead of the clock than this is refused. */
@@ -31,7 +38,7 @@ export const MAX_FUTURE_MS = 24 * 60 * 60 * 1000
  * Every real directory (not a symlink) with a valid bundle name, READY or not, oldest first.
  * Entries that vanish while listing (a concurrent prune) are skipped.
  */
-export function bundleDirectories(directory: string): string[] {
+export function listBundleDirectoryNames(directory: string): string[] {
   assertDirectory(directory)
   const names = readdirSync(directory)
   internalHooks.step?.('list:read', directory)
@@ -46,8 +53,8 @@ export function bundleDirectories(directory: string): string[] {
 
 /** Published bundles only (READY present), oldest first. Name order is creation order. */
 export function listBundles(folder: string): BundleSummary[] {
-  const directory = realPath(folder)
-  return bundleDirectories(directory).flatMap((name) => {
+  const directory = resolveFilesystemPath(folder)
+  return listBundleDirectoryNames(directory).flatMap((name) => {
     const bundle = { name, path: join(directory, name) }
     if (!existsSync(join(bundle.path, READY))) return []
     const hadManifest = existsSync(join(bundle.path, MANIFEST))
@@ -66,9 +73,9 @@ export function listBundles(folder: string): BundleSummary[] {
 }
 
 /** Pick a bundle by name (a real directory, never a symlink), or the newest READY bundle. */
-export function selectBundle(directory: string, name?: string): BundleLocation {
+export function requireSelectedBundle(directory: string, name?: string): BundleLocation {
   if (name !== undefined) {
-    parseBundleName(name)
+    requireBundleTimestamp(name)
     const path = join(directory, name)
     const stat = lstatSync(path, { throwIfNoEntry: false })
     if (!stat) throw new BackupException('E_BACKUP_NOT_FOUND', `no bundle ${name}`)
@@ -77,14 +84,14 @@ export function selectBundle(directory: string, name?: string): BundleLocation {
     }
     return { name, path }
   }
-  const newest = bundleDirectories(directory)
+  const newest = listBundleDirectoryNames(directory)
     .filter((entry) => existsSync(join(directory, entry, READY)))
     .at(-1)
   if (!newest) throw new BackupException('E_BACKUP_NOT_FOUND', `no READY bundle in ${directory}`)
   return { name: newest, path: join(directory, newest) }
 }
 
-function validMigrations(value: unknown): value is NonNullable<BundleManifest['migrations']> {
+function isMigrationManifest(value: unknown): value is NonNullable<BundleManifest['migrations']> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const record = value as Record<string, unknown>
   return (
@@ -109,7 +116,7 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
       typeof manifest.createdAt !== 'string' ||
       !Number.isFinite(Date.parse(manifest.createdAt)) ||
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
-      (Object.hasOwn(manifest, 'migrations') && !validMigrations(manifest.migrations))
+      (Object.hasOwn(manifest, 'migrations') && !isMigrationManifest(manifest.migrations))
     )
       throw new Error('bad shape')
     return manifest
@@ -124,7 +131,7 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
 export function assertMatchesManifest(path: string, manifest: BundleManifest, label: string): void {
   let matches: boolean
   try {
-    matches = statSync(path).size === manifest.bytes && sha256File(path) === manifest.sha256
+    matches = statSync(path).size === manifest.bytes && hashFileSha256(path) === manifest.sha256
   } catch (cause) {
     throw new BackupException('E_BACKUP_INVALID', `${label}: database file cannot be read`, {
       cause,
@@ -133,7 +140,7 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
   if (!matches) {
     throw new BackupException('E_BACKUP_INVALID', `${label}: checksum does not match manifest`)
   }
-  const problem = checkDatabase(path)
+  const problem = readDatabaseIntegrityProblem(path)
   if (problem) throw new BackupException('E_BACKUP_INVALID', `${label}: ${problem}`)
   if (manifest.migrations) assertMigrations(path, manifest.migrations)
 }
@@ -143,8 +150,8 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
  * being checked, the result is E_BACKUP_NOT_FOUND, not a false E_BACKUP_INVALID.
  */
 export function verifyBundle(folder: string, name?: string): BundleLocation {
-  const directory = realPath(folder)
-  const bundle = selectBundle(directory, name)
+  const directory = resolveFilesystemPath(folder)
+  const bundle = requireSelectedBundle(directory, name)
   internalHooks.step?.('verify:listed', bundle.path)
   // Default selection saw READY; a concurrent unpublish is reported as NOT_FOUND.
   const wasReady = name === undefined || existsSync(join(bundle.path, READY))
@@ -181,9 +188,11 @@ export async function createBundle(
 ): Promise<CreateResult> {
   const { lockTimeoutMs = 0, requireWal = false, now = Date.now } = input
   const borrowed = input.source?.database
-  const livePath = borrowed ? borrowedSourcePath(borrowed) : realPath(input.livePath!)
-  const directory = realPath(input.directory)
-  assertDirectory(directory, true)
+  const livePath = borrowed
+    ? requireBorrowedSourcePath(borrowed)
+    : resolveFilesystemPath(input.livePath!)
+  const directory = resolveFilesystemPath(input.directory)
+  assertDirectory(directory, { requirePrivateRoot: true })
   assertSafeLayout(livePath, directory)
   const lock = await acquireCreateLock(directory, lockTimeoutMs)
   const warnings: string[] = []
@@ -240,8 +249,8 @@ export async function createBundle(
     // Names must stay strictly increasing even if the clock steps back, because prune orders by
     // name. A newest bundle far in the future is a stray or a wrong clock: refuse, do not follow it.
     const clock = now()
-    const newest = bundleDirectories(directory).at(-1)
-    const newestStamp = newest ? parseBundleName(newest) : Number.NEGATIVE_INFINITY
+    const newest = listBundleDirectoryNames(directory).at(-1)
+    const newestStamp = newest ? requireBundleTimestamp(newest) : Number.NEGATIVE_INFINITY
     if (newestStamp > clock + MAX_FUTURE_MS) {
       throw new BackupException(
         'E_BACKUP_UNSAFE',
@@ -249,7 +258,7 @@ export async function createBundle(
       )
     }
     const stamp = Math.max(clock, newestStamp + 1)
-    const name = bundleName(stamp)
+    const name = requireFormattedBundleName(stamp)
     internalHooks.step?.('create:naming', directory)
     try {
       mkdirSync(join(directory, name), { mode: 0o700 })
@@ -264,7 +273,7 @@ export async function createBundle(
     syncPath(directory)
     const file = join(bundlePath, DATABASE)
     const migrationsTable = input.migrationsTable ?? 'adonis_schema'
-    const migrations = migrationRows(source, migrationsTable)
+    const migrations = readMigrationRows(source, migrationsTable)
     internalHooks.step?.('create:copying', file)
     // One step: the default 100-page steps restart on every write by another connection and
     // never finish under sustained writes. One step copies under a single read snapshot.
@@ -281,7 +290,7 @@ export async function createBundle(
     rmSync(`${file}-shm`, { force: true })
     const journal = openDatabase(file, { fileMustExist: true, readonly: true })
     try {
-      if (!isDeepStrictEqual(migrationRows(journal, migrationsTable), migrations)) {
+      if (!isDeepStrictEqual(readMigrationRows(journal, migrationsTable), migrations)) {
         throw new BackupException(
           'E_BACKUP_INVALID',
           `new backup migration journal ${migrationsTable} mismatch`
@@ -290,7 +299,7 @@ export async function createBundle(
     } finally {
       journal.close()
     }
-    const problem = checkDatabase(file)
+    const problem = readDatabaseIntegrityProblem(file)
     if (problem) throw new BackupException('E_BACKUP_INVALID', `new backup failed: ${problem}`)
     chmodSync(file, 0o400)
     syncPath(file)
@@ -299,7 +308,7 @@ export async function createBundle(
       format: 1,
       createdAt: new Date(clock).toISOString(),
       bytes: statSync(file).size,
-      sha256: sha256File(file),
+      sha256: hashFileSha256(file),
       sourceJournalMode: journalMode,
       ...(migrations
         ? {
@@ -311,7 +320,7 @@ export async function createBundle(
           }
         : {}),
     }
-    if (manifest.migrations && !validMigrations(manifest.migrations)) {
+    if (manifest.migrations && !isMigrationManifest(manifest.migrations)) {
       throw new BackupException('E_BACKUP_INVALID', 'new backup has unsupported migration metadata')
     }
     writeDurable(join(bundlePath, MANIFEST), JSON.stringify(manifest, null, 2))

@@ -42,7 +42,7 @@ export function writeDurable(path: string, data: string): void {
 }
 
 /** SHA-256 of a file, read in 1 MiB chunks: constant memory, no 2 GiB limit. */
-export function sha256File(path: string): string {
+export function hashFileSha256(path: string): string {
   const hash = createHash('sha256')
   const buffer = Buffer.allocUnsafe(1 << 20)
   const fd = openSync(path, 'r')

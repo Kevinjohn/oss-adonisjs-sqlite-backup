@@ -8,7 +8,7 @@ const MAX_LINKS = 40
 /** Stands for a trailing slash. It cannot be a folder name, since paths are split on it. */
 const TRAILING_SLASH = '/'
 
-const segments = (path: string) => {
+const splitPathSegments = (path: string) => {
   const parts = path.split('/').filter((s) => s !== '')
   if (path.endsWith('/')) parts.push(TRAILING_SLASH)
   return parts
@@ -27,39 +27,39 @@ const segments = (path: string) => {
  * Never pass the input through `path.resolve` or `path.normalize` first: they collapse `..` before
  * symlinks are followed.
  */
-export function realPath(path: string): string {
+export function resolveFilesystemPath(path: string): string {
   let current = isAbsolute(path) ? '/' : process.cwd()
-  const pending = segments(path)
-  let missing = false
-  let directory = true
+  const pending = splitPathSegments(path)
+  let isBeyondExistingPrefix = false
+  let isDirectory = true
   let hops = 0
   while (pending.length > 0) {
     const segment = pending.shift()!
-    if (!directory) {
+    if (!isDirectory) {
       throw new BackupException('E_BACKUP_UNSAFE', `path ${path} traverses a non-directory`)
     }
     if (segment === TRAILING_SLASH) continue
     if (segment === '.') {
-      if (missing)
+      if (isBeyondExistingPrefix)
         throw new BackupException('E_BACKUP_UNSAFE', `path ${path} has . after a missing folder`)
       continue
     }
     if (segment === '..') {
-      if (missing) {
+      if (isBeyondExistingPrefix) {
         throw new BackupException('E_BACKUP_UNSAFE', `path ${path} has .. after a missing folder`)
       }
       current = dirname(current)
       continue
     }
     const next = join(current, segment)
-    if (missing) {
+    if (isBeyondExistingPrefix) {
       current = next
       continue
     }
     const stat = lstatSync(next, { throwIfNoEntry: false })
     if (!stat?.isSymbolicLink()) {
-      missing = stat === undefined
-      directory = missing || !!stat?.isDirectory()
+      isBeyondExistingPrefix = stat === undefined
+      isDirectory = isBeyondExistingPrefix || !!stat?.isDirectory()
       current = next
       continue
     }
@@ -68,7 +68,7 @@ export function realPath(path: string): string {
     }
     const link = readlinkSync(next)
     if (isAbsolute(link)) current = '/'
-    pending.unshift(...segments(link))
+    pending.unshift(...splitPathSegments(link))
   }
   return current
 }

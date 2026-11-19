@@ -11,20 +11,20 @@ import {
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 
-const changed = (...paths: string[]): ChangedFile[] =>
+const makeChangedFiles = (...paths: string[]): ChangedFile[] =>
   paths.map((path) => ({ path, deleted: false }))
 
-function ran(plan: PlannedCheckStep[]): Record<string, string[]> {
+function readPlannedCommands(plan: PlannedCheckStep[]): Record<string, string[]> {
   return Object.fromEntries(
     plan.flatMap((step) => ('command' in step ? [[step.label, step.command]] : []))
   )
 }
 
 test('a changed spec runs on its own and requires executed tests', ({ assert }) => {
-  const plan = planChangedChecks(changed('tests/create.spec.ts'))
+  const plan = planChangedChecks(makeChangedFiles('tests/create.spec.ts'))
   const tests = plan.find((step) => step.label === 'tests')
 
-  assert.deepEqual(Object.keys(ran(plan)), ['format', 'lint', 'typecheck', 'tests'])
+  assert.deepEqual(Object.keys(readPlannedCommands(plan)), ['format', 'lint', 'typecheck', 'tests'])
   assert.deepInclude(tests, {
     command: ['pnpm', 'quick:test', '--files=tests/create.spec.ts'],
     countsTests: true,
@@ -34,7 +34,9 @@ test('a changed spec runs on its own and requires executed tests', ({ assert }) 
 
 test('package source and manifests run the suite and build', ({ assert }) => {
   for (const path of ['src/create.ts', 'package.json', 'pnpm-lock.yaml']) {
-    const commands = ran(planChangedChecks(changed(path, 'tests/create.spec.ts')))
+    const commands = readPlannedCommands(
+      planChangedChecks(makeChangedFiles(path, 'tests/create.spec.ts'))
+    )
     assert.deepEqual(commands.tests, ['pnpm', 'quick:test'], path)
     assert.deepEqual(commands.build, ['pnpm', 'build'], path)
   }
@@ -48,7 +50,7 @@ test('files the specs read run the full suite without building the package', ({ 
     'user-stories/README.md',
     '.github/workflows/checks.yml',
   ]) {
-    const commands = ran(planChangedChecks(changed(path)))
+    const commands = readPlannedCommands(planChangedChecks(makeChangedFiles(path)))
     assert.deepEqual(commands.tests, ['pnpm', 'quick:test'], path)
     assert.notProperty(commands, 'build', path)
   }
@@ -56,12 +58,16 @@ test('files the specs read run the full suite without building the package', ({ 
 
 test('lockfile and workspace changes run lint and typecheck', ({ assert }) => {
   for (const path of ['pnpm-lock.yaml', 'pnpm-workspace.yaml']) {
-    assert.properties(ran(planChangedChecks(changed(path))), ['lint', 'typecheck'], path)
+    assert.properties(
+      readPlannedCommands(planChangedChecks(makeChangedFiles(path))),
+      ['lint', 'typecheck'],
+      path
+    )
   }
 })
 
 test('deleted files select checks but are never passed to tools', ({ assert }) => {
-  const commands = ran(
+  const commands = readPlannedCommands(
     planChangedChecks([
       { path: 'src/old_module.ts', deleted: true },
       { path: 'tests/old_module.spec.ts', deleted: true },
@@ -73,13 +79,16 @@ test('deleted files select checks but are never passed to tools', ({ assert }) =
   assert.deepEqual(commands.tests, ['pnpm', 'quick:test'])
   assert.notInclude(commands.lint.join(' '), 'old_module')
   assert.deepEqual(
-    ran(planChangedChecks([{ path: 'tests/old_module.spec.ts', deleted: true }])).tests,
+    readPlannedCommands(planChangedChecks([{ path: 'tests/old_module.spec.ts', deleted: true }]))
+      .tests,
     ['pnpm', 'quick:test']
   )
 })
 
 test('formats only existing files and leaves the lockfile to pnpm', ({ assert }) => {
-  const commands = ran(planChangedChecks(changed('README.md', 'pnpm-lock.yaml')))
+  const commands = readPlannedCommands(
+    planChangedChecks(makeChangedFiles('README.md', 'pnpm-lock.yaml'))
+  )
 
   assert.deepEqual(commands.format.slice(-1), ['README.md'])
   assert.include(commands.format, '--ignore-unknown')
@@ -88,23 +97,33 @@ test('formats only existing files and leaves the lockfile to pnpm', ({ assert })
 
 test('formatter configuration checks the whole tree', ({ assert }) => {
   for (const path of ['.prettierignore', '.editorconfig', 'package.json'])
-    assert.deepEqual(ran(planChangedChecks(changed(path))).format, ['pnpm', 'format:check'], path)
+    assert.deepEqual(
+      readPlannedCommands(planChangedChecks(makeChangedFiles(path))).format,
+      ['pnpm', 'format:check'],
+      path
+    )
 })
 
 test('lint allows no warnings and skips files ESLint ignores', async ({ assert }) => {
-  assert.deepEqual(ran(planChangedChecks(changed('commands/main.ts'))).lint, ['pnpm', 'lint'])
+  assert.deepEqual(
+    readPlannedCommands(planChangedChecks(makeChangedFiles('commands/main.ts'))).lint,
+    ['pnpm', 'lint']
+  )
   // The repository's own lint script carries the zero-warning limit for every caller.
   const manifest = JSON.parse(await readFile(join(repoRoot, 'package.json'), 'utf8'))
   assert.include(manifest.scripts.lint, '--max-warnings 0')
-  assert.notProperty(ran(planChangedChecks(changed('stubs/main.ts'))), 'lint')
+  assert.notProperty(
+    readPlannedCommands(planChangedChecks(makeChangedFiles('stubs/main.ts'))),
+    'lint'
+  )
 })
 
 test('--static names each selected suite in a skip line instead of running it', ({ assert }) => {
-  const plan = planChangedChecks(changed('src/create.ts', 'package.json', 'README.md'), {
+  const plan = planChangedChecks(makeChangedFiles('src/create.ts', 'package.json', 'README.md'), {
     static: true,
   })
 
-  assert.deepEqual(Object.keys(ran(plan)), ['format', 'lint', 'typecheck'])
+  assert.deepEqual(Object.keys(readPlannedCommands(plan)), ['format', 'lint', 'typecheck'])
   for (const [label, skip] of [
     ['test suite', '--static leaves out pnpm quick:test'],
     ['build', '--static leaves out pnpm build'],
@@ -113,13 +132,17 @@ test('--static names each selected suite in a skip line instead of running it', 
 })
 
 test('--static still runs the changed specs on their own', ({ assert }) => {
-  const plan = planChangedChecks(changed('src/create.ts', 'tests/create.spec.ts'), {
+  const plan = planChangedChecks(makeChangedFiles('src/create.ts', 'tests/create.spec.ts'), {
     static: true,
   })
 
-  assert.deepEqual(ran(plan).tests, ['pnpm', 'quick:test', '--files=tests/create.spec.ts'])
+  assert.deepEqual(readPlannedCommands(plan).tests, [
+    'pnpm',
+    'quick:test',
+    '--files=tests/create.spec.ts',
+  ])
   assert.deepInclude(plan, { label: 'test suite', skip: '--static leaves out pnpm quick:test' })
-  assert.deepInclude(planChangedChecks(changed('src/create.ts'), { static: true }), {
+  assert.deepInclude(planChangedChecks(makeChangedFiles('src/create.ts'), { static: true }), {
     label: 'tests',
     skip: 'no test files changed',
   })
@@ -127,8 +150,8 @@ test('--static still runs the changed specs on their own', ({ assert }) => {
 
 test('--static plans a spec-only change exactly as the default does', ({ assert }) => {
   assert.deepEqual(
-    planChangedChecks(changed('tests/create.spec.ts'), { static: true }),
-    planChangedChecks(changed('tests/create.spec.ts'))
+    planChangedChecks(makeChangedFiles('tests/create.spec.ts'), { static: true }),
+    planChangedChecks(makeChangedFiles('tests/create.spec.ts'))
   )
 })
 

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { openDatabase } from '../src/native.js'
 
 /** A fresh temporary directory removed by the returned cleanup. */
-export function tempRoot(): { root: string; cleanup: () => void } {
+export function createTemporaryRoot(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'adonisjs-sqlite-backup-'))
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }

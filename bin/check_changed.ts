@@ -134,20 +134,20 @@ function misuse(message: string): never {
   process.exit(2)
 }
 
-function git(args: string[]): string {
+function runGit(args: string[]): string {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) misuse(`git ${args.join(' ')} failed: ${result.stderr.trim()}`)
   return result.stdout
 }
 
-function changedFiles(base: string): ChangedFile[] {
-  const mergeBase = git(['merge-base', base, 'HEAD']).trim()
-  const tracked = git(['diff', '--name-status', '--no-renames', '-z', mergeBase]).split('\0')
+function listChangedFiles(base: string): ChangedFile[] {
+  const mergeBase = runGit(['merge-base', base, 'HEAD']).trim()
+  const tracked = runGit(['diff', '--name-status', '--no-renames', '-z', mergeBase]).split('\0')
   const changes: ChangedFile[] = []
   for (let index = 0; index + 1 < tracked.length; index += 2) {
     changes.push({ path: tracked[index + 1], deleted: tracked[index] === 'D' })
   }
-  for (const path of git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')) {
+  for (const path of runGit(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')) {
     if (path) changes.push({ path, deleted: false })
   }
   return changes
@@ -242,7 +242,7 @@ if (
 )
   misuse(`Unknown base ref ${base}`)
 
-const changes = changedFiles(base)
+const changes = listChangedFiles(base)
 console.log(`[check:changed] ${changes.length} changed files since the merge-base with ${base}`)
 let failed = false
 for (const step of planChangedChecks(changes, { static: flags.includes('--static') })) {
@@ -251,7 +251,7 @@ for (const step of planChangedChecks(changes, { static: flags.includes('--static
     console.log(`skip ${step.label} (${step.skip})`)
     continue
   }
-  const before = step.requiresCleanTree ? git(['status', '--porcelain']) : ''
+  const before = step.requiresCleanTree ? runGit(['status', '--porcelain']) : ''
   const { status, output } = await run(step)
   const tests = step.countsTests ? executedTests(output) : undefined
   const problem =
@@ -261,7 +261,7 @@ for (const step of planChangedChecks(changes, { static: flags.includes('--static
         ? `interrupted by ${interruptedBy}`
         : step.requiresTests && tests === 0
           ? 'no tests executed'
-          : step.requiresCleanTree && git(['status', '--porcelain']) !== before
+          : step.requiresCleanTree && runGit(['status', '--porcelain']) !== before
             ? 'left the worktree dirty'
             : undefined
   if (problem) {

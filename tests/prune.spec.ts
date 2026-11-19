@@ -11,7 +11,7 @@ import { internalHooks } from '../src/internal_hooks.js'
 import { acquireLock } from '../src/lock.js'
 import { pruneBundles } from '../src/prune.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
-import { makeLiveDatabase, startChild, stopChild, tempRoot } from './helpers.js'
+import { makeLiveDatabase, startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 test.group('pruneBundles', (group) => {
   let root: string
@@ -19,7 +19,7 @@ test.group('pruneBundles', (group) => {
   let live: string
   let directory: string
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     makeLiveDatabase(live).close()

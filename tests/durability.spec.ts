@@ -9,14 +9,14 @@ import { writeAll } from '../src/fs.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
-import { makeLiveDatabase, tempRoot } from './helpers.js'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
 test.group('durability', (group) => {
   let root: string
   let cleanup: () => void
   let events: string[]
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     events = []
     internalHooks.durability = (event, path) => {
       events.push(`${event} ${relative(root, path).replace(/bak-utc-[\d-]+/, 'BUNDLE')}`)

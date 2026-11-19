@@ -10,7 +10,7 @@ const closeSeen = new WeakSet<ChildProcess>()
 type WriterLifecycle = { failure?: Error; stopping: boolean }
 const writerLifecycles = new WeakMap<ChildProcess, WriterLifecycle>()
 
-function lifecycleFor(child: ChildProcess): WriterLifecycle {
+function createWriterLifecycle(child: ChildProcess): WriterLifecycle {
   const existing = writerLifecycles.get(child)
   if (existing) return existing
 
@@ -79,11 +79,15 @@ function observeClose(child: ChildProcess): void {
   child.once('close', () => closeSeen.add(child))
 }
 
-function onceMessage<T>(
-  resource: ChildProcess | Worker,
-  select: (message: unknown) => T | undefined,
-  label: string,
+interface WaitForResourceMessageOptions<T> {
+  select: (message: unknown) => T | undefined
+  label: string
   timeoutMs: number
+}
+
+function waitForResourceMessage<T>(
+  resource: ChildProcess | Worker,
+  { select, label, timeoutMs }: WaitForResourceMessageOptions<T>
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
@@ -166,22 +170,21 @@ async function terminateWriter(child: ChildProcess): Promise<void> {
 
 export async function waitForWriterReady(child: ChildProcess, timeoutMs = 10_000): Promise<void> {
   observeClose(child)
-  lifecycleFor(child)
-  await onceMessage(
-    child,
-    (message) => {
+  createWriterLifecycle(child)
+  await waitForResourceMessage(child, {
+    select: (message) => {
       if (message === 'ready') return true
       if (message instanceof Error) throw message
       return undefined
     },
-    'Writer readiness',
-    timeoutMs
-  )
+    label: 'Writer readiness',
+    timeoutMs,
+  })
 }
 
 export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promise<WriterStats> {
   observeClose(child)
-  const lifecycle = lifecycleFor(child)
+  const lifecycle = createWriterLifecycle(child)
   if (lifecycle.failure) {
     try {
       await terminateWriter(child)
@@ -193,9 +196,8 @@ export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promi
     }
     throw lifecycle.failure
   }
-  const response = onceMessage(
-    child,
-    (message) => {
+  const response = waitForResourceMessage(child, {
+    select: (message) => {
       if (typeof message !== 'string') return undefined
       const stats = JSON.parse(message) as WriterStats
       if (
@@ -211,9 +213,9 @@ export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promi
       }
       return stats
     },
-    'Writer stats',
-    timeoutMs
-  )
+    label: 'Writer stats',
+    timeoutMs,
+  })
   try {
     lifecycle.stopping = true
     child.send('stop')
@@ -231,15 +233,14 @@ export async function stopWriter(child: ChildProcess, timeoutMs = 10_000): Promi
 }
 
 export async function waitForSamplerPeak(worker: Worker, timeoutMs = 10_000): Promise<number> {
-  const response = onceMessage(
-    worker,
-    (message) => {
+  const response = waitForResourceMessage(worker, {
+    select: (message) => {
       if (typeof message !== 'number') return undefined
       return message
     },
-    'Sampler stats',
-    timeoutMs
-  )
+    label: 'Sampler stats',
+    timeoutMs,
+  })
   try {
     worker.postMessage('stop')
     return await response
@@ -254,7 +255,7 @@ export async function stopSampler(worker: Worker): Promise<void> {
 }
 
 export async function withWriter<T>(child: ChildProcess, operation: () => Promise<T>): Promise<T> {
-  const lifecycle = lifecycleFor(child)
+  const lifecycle = createWriterLifecycle(child)
   let result: T | undefined
   let operationError: unknown
   try {

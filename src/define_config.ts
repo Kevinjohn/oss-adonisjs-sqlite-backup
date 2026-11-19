@@ -1,6 +1,6 @@
 import { BackupException } from './errors.js'
 import type { BackupConfig, BackupConfigInput } from './types.js'
-import { validateLockTimeout } from './lock.js'
+import { assertLockTimeout } from './lock.js'
 
 /** Validate `config/backup.ts` and apply defaults. */
 export function defineConfig(input: BackupConfigInput): BackupConfig {
@@ -12,7 +12,7 @@ export function defineConfig(input: BackupConfigInput): BackupConfig {
     )
   }
   const lockTimeoutMs = input.lockTimeoutMs ?? 0
-  validateLockTimeout(lockTimeoutMs)
+  assertLockTimeout(lockTimeoutMs)
   return {
     connection: input.connection,
     directory: input.directory ?? '',

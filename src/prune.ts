@@ -1,9 +1,9 @@
 import { existsSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertDirectory } from './directory.js'
-import { bundleDirectories } from './bundles.js'
+import { listBundleDirectoryNames } from './bundles.js'
 import { BackupException } from './errors.js'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { acquireLock } from './lock.js'
@@ -21,18 +21,21 @@ export function pruneBundles(input: {
   keep: number
   lockTimeoutMs?: number
 }): PruneResult {
-  const { keep, lockTimeoutMs = 0 } = input
-  const directory = realPath(input.directory)
-  if (!Number.isInteger(keep) || keep < 1) {
-    throw new BackupException('E_BACKUP_UNSAFE', `keep must be an integer >= 1 (got ${keep})`)
+  const { keep: retainedBundleCount, lockTimeoutMs = 0 } = input
+  const directory = resolveFilesystemPath(input.directory)
+  if (!Number.isInteger(retainedBundleCount) || retainedBundleCount < 1) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      `keep must be an integer >= 1 (got ${retainedBundleCount})`
+    )
   }
   const result: PruneResult = { removed: [], abandoned: [], failed: [] }
-  assertDirectory(directory, true)
+  assertDirectory(directory, { requirePrivateRoot: true })
   const lock = acquireLock(directory, lockTimeoutMs)
   try {
     const ready: string[] = []
     const unfinished: string[] = []
-    for (const name of bundleDirectories(directory)) {
+    for (const name of listBundleDirectoryNames(directory)) {
       const group = existsSync(join(directory, name, READY)) ? ready : unfinished
       group.push(name)
     }
@@ -51,7 +54,7 @@ export function pruneBundles(input: {
         result.failed.push({ name, reason: String(error) })
       }
     }
-    for (const name of ready.slice(0, Math.max(0, ready.length - keep)))
+    for (const name of ready.slice(0, Math.max(0, ready.length - retainedBundleCount)))
       remove(name, result.removed)
     for (const name of unfinished) remove(name, result.abandoned)
     if (result.removed.length + result.abandoned.length > 0) syncPath(directory)

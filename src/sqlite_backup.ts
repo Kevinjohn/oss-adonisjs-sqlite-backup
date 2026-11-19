@@ -2,7 +2,7 @@ import { createBundle, listBundles, verifyBundle } from './bundles.js'
 import { prepareDirectory } from './directory.js'
 import { BackupException } from './errors.js'
 import type { NativeDatabase } from './native.js'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 import { pruneBundles } from './prune.js'
 import { prepareRestore } from './restore.js'
 import { isWithin, openOwnedSource, resolveSqliteSource } from './source.js'
@@ -15,7 +15,7 @@ export class SqliteBackup {
     protected database: LucidDatabaseConfig | undefined
   ) {}
 
-  private directory(override?: string): string {
+  private requireBackupDirectory(override?: string): string {
     const directory = override ?? this.config.directory
     if (!directory) throw new BackupException('E_BACKUP_DISABLED', 'backups are disabled')
     return directory
@@ -23,7 +23,7 @@ export class SqliteBackup {
 
   /** Live SQLite path, read from Lucid's connection config on every call. */
   livePath(): string {
-    this.directory()
+    this.requireBackupDirectory()
     return resolveSqliteSource(this.database, this.config.connection)
   }
 
@@ -46,11 +46,11 @@ export class SqliteBackup {
   }
 
   prepareDirectory(): void {
-    prepareDirectory(this.directory())
+    prepareDirectory(this.requireBackupDirectory())
   }
 
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
-    const directory = this.directory()
+    const directory = this.requireBackupDirectory()
     const connection = this.config.connection ?? this.database?.connection
     return createBundle({
       ...(options.database
@@ -67,23 +67,23 @@ export class SqliteBackup {
   }
 
   list(directory?: string) {
-    return listBundles(this.directory(directory))
+    return listBundles(this.requireBackupDirectory(directory))
   }
 
   verify(name?: string, directory?: string) {
-    return verifyBundle(this.directory(directory), name)
+    return verifyBundle(this.requireBackupDirectory(directory), name)
   }
 
   prepareRestore(input: { target: string; name?: string; directory?: string }) {
     return prepareRestore({
       ...input,
-      directory: this.directory(input.directory),
+      directory: this.requireBackupDirectory(input.directory),
       livePath: resolveSqliteSource(this.database, this.config.connection),
     })
   }
 
   prune(options: { keep?: number } = {}) {
-    const directory = realPath(this.directory())
+    const directory = resolveFilesystemPath(this.requireBackupDirectory())
     let livePath: string | undefined
     try {
       livePath = resolveSqliteSource(this.database, this.config.connection)
