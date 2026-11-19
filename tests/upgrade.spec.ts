@@ -4,10 +4,12 @@
  */
 import { test } from '@japa/runner'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   realpathSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -302,12 +304,70 @@ test.group('db:upgrade', (group) => {
     assert.notInclude(tables(booted.live), 'heroes')
   })
 
-  test('exits non-zero when a migration fails', async ({ assert }) => {
+  test('refuses an archive containing the live database before preparing it', async ({
+    assert,
+  }) => {
+    const backups = join(root, 'backups')
+    const directory = join(backups, 'pre-migration')
+    mkdirSync(directory, { recursive: true })
+    chmodSync(directory, 0o750)
+    const live = join(directory, 'live.db')
+    const seed = openDatabase(live)
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+      seed.exec('CREATE TABLE adonis_schema (id INTEGER PRIMARY KEY, name VARCHAR, batch INTEGER)')
+      seed.exec("INSERT INTO adonis_schema (name, batch) VALUES ('known migration', 1)")
+      seed.exec('CREATE TABLE adonis_schema_versions (version INTEGER PRIMARY KEY)')
+      seed.exec('INSERT INTO adonis_schema_versions (version) VALUES (2)')
+    } finally {
+      seed.close()
+    }
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const booted = await bootApp(root, { filename: live, backups })
+    app = booted.app
+    const command = await booted.upgrade()
+    assert.equal(command.exitCode, 1)
+    assert.include(booted.logs(), 'contains the live database')
+    assert.equal(statSync(directory).mode & 0o777, 0o750)
+    assert.notInclude(tables(live), 'heroes')
+    const database = openDatabase(live, { readonly: true })
+    try {
+      assert.deepEqual(database.prepare('SELECT name, batch FROM adonis_schema').all(), [
+        { name: 'known migration', batch: 1 },
+      ])
+    } finally {
+      database.close()
+    }
+  })
+
+  test('keeps a usable pre-upgrade snapshot when a migration fails', async ({ assert }) => {
+    const seed = openDatabase(join(root, 'live.db'))
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY, name TEXT)')
+      seed.exec("INSERT INTO villains (id, name) VALUES (1, 'known row')")
+    } finally {
+      seed.close()
+    }
     writeMigration(root, '001_broken', "await this.db.rawQuery('SELECT * FROM no_such_table')")
     const booted = await bootApp(root)
     app = booted.app
     const command = await booted.upgrade()
     assert.isAbove(command.exitCode ?? 0, 0)
+    assert.include(command.error?.message, 'no such table: no_such_table')
+    const bundle = verifyBundle(`${booted.live}.backups`)
+    assert.include(booted.logs(), `Pre-upgrade backup written ${bundle.path}`)
+    const database = openDatabase(join(bundle.path, 'db.sqlite'), { readonly: true })
+    try {
+      assert.deepEqual(database.prepare('SELECT id, name FROM villains').all(), [
+        { id: 1, name: 'known row' },
+      ])
+    } finally {
+      database.close()
+    }
   })
 
   test('refuses a connection that is not better-sqlite3', async ({ assert }) => {
