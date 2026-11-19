@@ -4,10 +4,12 @@
  */
 import { test } from '@japa/runner'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   realpathSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -300,6 +302,46 @@ test.group('db:upgrade', (group) => {
     assert.equal(command.exitCode, 1)
     assert.include(booted.logs(), 'Upgrade failed: ')
     assert.notInclude(tables(booted.live), 'heroes')
+  })
+
+  test('refuses an archive containing the live database before preparing it', async ({
+    assert,
+  }) => {
+    const backups = join(root, 'backups')
+    const directory = join(backups, 'pre-migration')
+    mkdirSync(directory, { recursive: true })
+    chmodSync(directory, 0o750)
+    const live = join(directory, 'live.db')
+    const seed = openDatabase(live)
+    try {
+      seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+      seed.exec('CREATE TABLE adonis_schema (id INTEGER PRIMARY KEY, name VARCHAR, batch INTEGER)')
+      seed.exec("INSERT INTO adonis_schema (name, batch) VALUES ('known migration', 1)")
+      seed.exec('CREATE TABLE adonis_schema_versions (version INTEGER PRIMARY KEY)')
+      seed.exec('INSERT INTO adonis_schema_versions (version) VALUES (2)')
+    } finally {
+      seed.close()
+    }
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const booted = await bootApp(root, { filename: live, backups })
+    app = booted.app
+    const command = await booted.upgrade()
+    assert.equal(command.exitCode, 1)
+    assert.include(booted.logs(), 'contains the live database')
+    assert.equal(statSync(directory).mode & 0o777, 0o750)
+    assert.notInclude(tables(live), 'heroes')
+    const database = openDatabase(live, { readonly: true })
+    try {
+      assert.deepEqual(database.prepare('SELECT name, batch FROM adonis_schema').all(), [
+        { name: 'known migration', batch: 1 },
+      ])
+    } finally {
+      database.close()
+    }
   })
 
   test('exits non-zero when a migration fails', async ({ assert }) => {
