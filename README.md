@@ -60,6 +60,11 @@ and tightens an existing directory to mode `0700`; an existing non-directory roo
 manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
+If prune fails while syncing the archive or releasing its lock, the command exits nonzero and
+reports the removals it observed and any per-bundle errors. A failed archive sync leaves removal
+durability unconfirmed. Programmatic callers can read the same details from the error's
+`pruneProgress` property.
+
 Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with

@@ -3,6 +3,7 @@ import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { BackupException } from '../src/errors.js'
 import { realPath } from '../src/paths.js'
 import { assertSafeLayout } from '../src/source.js'
+import type { PruneProgress, PruneResult } from '../src/types.js'
 
 const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
@@ -40,6 +41,12 @@ export default class DbBackup extends BaseCommand {
     description: 'list / verify / restore-prepare: use this directory instead of config',
   })
   declare directory?: string
+
+  private reportPruneFailures(failures: PruneResult['failed']) {
+    for (const failure of failures) {
+      this.logger.warning(`could not remove ${failure.name}: ${failure.reason}`)
+    }
+  }
 
   async run() {
     try {
@@ -84,9 +91,7 @@ export default class DbBackup extends BaseCommand {
         }
         case 'prune': {
           const result = await backup.prune({ keep: this.keep })
-          for (const failure of result.failed) {
-            this.logger.warning(`could not remove ${failure.name}: ${failure.reason}`)
-          }
+          this.reportPruneFailures(result.failed)
           this.logger.success(
             `Pruned ${result.removed.length} bundle(s), ${result.abandoned.length} unfinished`
           )
@@ -103,6 +108,17 @@ export default class DbBackup extends BaseCommand {
       const code = error instanceof BackupException ? `${error.code}: ` : ''
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+      const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)
+        ?.pruneProgress
+      if (progress) {
+        this.reportPruneFailures(progress.failed)
+        for (const name of progress.removed) this.logger.warning(`Observed removed bundle: ${name}`)
+        for (const name of progress.abandoned)
+          this.logger.warning(`Observed removed unfinished bundle: ${name}`)
+        if (progress.archiveSyncFailed) {
+          this.logger.warning('Archive sync failed. Removal durability is unconfirmed.')
+        }
+      }
       if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
         this.logger.error(
           `backup temp cleanup failed: ${String((error as { cleanupError?: unknown }).cleanupError)}`

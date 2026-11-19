@@ -63,6 +63,12 @@ export interface PruneResult {
   removed: string[]
   /** Unfinished bundles (no READY) removed; only possible while holding the lock. */
   abandoned: string[]
-  /** Bundles that could not be removed, with the reason. Prune never throws for these. */
+  /** Bundles that could not be removed, with the reason. These do not cause prune to throw. */
   failed: Array<{ name: string; reason: string }>
+}
+
+/** Observations attached as `pruneProgress` to a prune finalization error. */
+export interface PruneProgress extends PruneResult {
+  /** The final archive sync failed, so removal durability is unconfirmed. */
+  archiveSyncFailed: boolean
 }

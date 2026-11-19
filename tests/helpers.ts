@@ -1,6 +1,15 @@
 import { prepareDirectory } from '../src/directory.js'
 import { fork, type ChildProcess } from 'node:child_process'
-import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from 'node:fs'
+import fs, {
+  fstatSync,
+  statSync,
+  closeSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/native.js'
@@ -138,4 +147,20 @@ export function runChild(
 export function prepared<T extends { directory: string }>(input: T): T {
   prepareDirectory(input.directory)
   return input
+}
+
+/** Inject an fsync error for this directory only, leaving per-bundle syncs intact. */
+export function failDirectorySync(directory: string, error: Error): () => void {
+  const { dev, ino } = statSync(directory)
+  const original = fs.fsyncSync
+  fs.fsyncSync = (fd) => {
+    const stat = fstatSync(fd)
+    if (stat.dev === dev && stat.ino === ino) throw error
+    original(fd)
+  }
+  syncBuiltinESMExports()
+  return () => {
+    fs.fsyncSync = original
+    syncBuiltinESMExports()
+  }
 }
