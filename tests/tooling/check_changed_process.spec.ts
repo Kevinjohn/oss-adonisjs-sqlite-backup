@@ -7,7 +7,7 @@ import { PassThrough } from 'node:stream'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from '@japa/runner'
-import { collectExit, isAlive, outputOf, waitForFile } from '../helpers/child_process.js'
+import { collectExit, isAlive, readChildOutput, waitForFile } from '../helpers/child_process.js'
 import { fileURLToPath } from 'node:url'
 import { startChild } from '../helpers.js'
 
@@ -31,7 +31,7 @@ type Fixture = {
   env: NodeJS.ProcessEnv
 }
 
-async function fixture(options: FixtureOptions = {}): Promise<Fixture> {
+async function makeToolingFixture(options: FixtureOptions = {}): Promise<Fixture> {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'sqlite-backup-check-changed-'))
   const root = path.join(directory, 'checkout')
   const bin = path.join(directory, 'bin')
@@ -109,19 +109,19 @@ function launch(f: Fixture): ChildProcess {
 test('runs selected static checks normally and observes a missing command spawn error', async ({
   cleanup,
 }) => {
-  const normal = await fixture()
+  const normal = await makeToolingFixture()
   cleanup(() => rm(normal.directory, { recursive: true, force: true }))
   const normalChild = launch(normal)
-  const normalOutput = await outputOf(normalChild)
+  const normalOutput = await readChildOutput(normalChild)
   const normalResult = await collectExit(normalChild, normalOutput)
   assert.equal(normalResult.code, 0, normalResult.text)
   assert.match(normalResult.text, /pass format/)
   assert.match(await readFile(normal.log, 'utf8'), /exec prettier --check/)
 
-  const missing = await fixture({ command: 'missing' })
+  const missing = await makeToolingFixture({ command: 'missing' })
   cleanup(() => rm(missing.directory, { recursive: true, force: true }))
   const missingChild = launch(missing)
-  const missingOutput = await outputOf(missingChild)
+  const missingOutput = await readChildOutput(missingChild)
   const missingResult = await collectExit(missingChild, missingOutput)
   assert.equal(missingResult.code, 1, missingResult.text)
   assert.match(missingResult.text, /spawn failed: spawn pnpm ENOENT/)
@@ -131,10 +131,10 @@ test('runs selected static checks normally and observes a missing command spawn 
 test('TERM-resistant descendants receive KILL, are reaped, and block later selected checks', async ({
   cleanup,
 }) => {
-  const f = await fixture({ command: 'hang' })
+  const f = await makeToolingFixture({ command: 'hang' })
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const descendantPid = await waitForFile(f.ready)
   child.kill('SIGTERM')
   const result = await collectExit(child, output)
@@ -148,10 +148,10 @@ test('TERM-resistant descendants receive KILL, are reaped, and block later selec
 test('a second signal escalates immediately while the first signal determines the exit code', async ({
   cleanup,
 }) => {
-  const f = await fixture({ command: 'hang', hook: 'record-term' })
+  const f = await makeToolingFixture({ command: 'hang', hook: 'record-term' })
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const descendantPid = await waitForFile(f.ready)
   child.kill('SIGTERM')
   await waitForFile(f.termSent)
@@ -163,10 +163,10 @@ test('a second signal escalates immediately while the first signal determines th
 }).timeout(15_000)
 
 test('reports failed final reap and retains the first signal result', async ({ cleanup }) => {
-  const f = await fixture({ command: 'hang', hook: 'fail-reap' })
+  const f = await makeToolingFixture({ command: 'hang', hook: 'fail-reap' })
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   await waitForFile(f.ready)
   child.kill('SIGTERM')
   const result = await collectExit(child, output)
@@ -179,7 +179,7 @@ test('reports failed final reap and retains the first signal result', async ({ c
 test('interrupt settles a never-closing owned child and releases its live local handles', async ({
   cleanup,
 }) => {
-  const f = await fixture()
+  const f = await makeToolingFixture()
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const hook = path.join(f.directory, 'never-close.cjs')
   await writeFile(
@@ -203,7 +203,7 @@ require('node:module').syncBuiltinESMExports()
   )
   f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const result = await collectExit(child, output)
   assert.equal(result.code, 143, result.text)
   assert.match(result.text, /did not exit after SIGKILL/)
@@ -215,7 +215,7 @@ require('node:module').syncBuiltinESMExports()
 test('deadline settles a never-closing owned child with timeout diagnostics', async ({
   cleanup,
 }) => {
-  const f = await fixture()
+  const f = await makeToolingFixture()
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const hook = path.join(f.directory, 'deadline-hook.cjs')
   await writeFile(
@@ -244,7 +244,7 @@ require('node:module').syncBuiltinESMExports()
   )
   f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const result = await collectExit(child, output)
   assert.equal(result.code, 1, result.text)
   assert.match(result.text, /stopped after 15 minutes/)
@@ -254,7 +254,7 @@ require('node:module').syncBuiltinESMExports()
 }).timeout(10_000)
 
 test('a stale deadline cannot signal a later child', async ({ cleanup }) => {
-  const f = await fixture()
+  const f = await makeToolingFixture()
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const hook = path.join(f.directory, 'stale-deadline-hook.cjs')
   await writeFile(
@@ -288,7 +288,7 @@ require('node:module').syncBuiltinESMExports()
   )
   f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const result = await collectExit(child, output)
   assert.equal(result.code, 0, result.text)
   assert.match(result.text, /pass lint/)
@@ -296,7 +296,7 @@ require('node:module').syncBuiltinESMExports()
 }).timeout(10_000)
 
 test('failed step retains only a bounded tail of captured output', async ({ cleanup }) => {
-  const f = await fixture()
+  const f = await makeToolingFixture()
   cleanup(() => rm(f.directory, { recursive: true, force: true }))
   const hook = path.join(f.directory, 'large-output-hook.cjs')
   await writeFile(
@@ -321,7 +321,7 @@ require('node:module').syncBuiltinESMExports()
   )
   f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS ?? ''} --require=${hook}`
   const child = launch(f)
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const result = await collectExit(child, output)
   assert.equal(result.code, 1, result.text)
   assert.match(result.text, /TAIL_MARKER/)
@@ -353,7 +353,7 @@ test('exit collection includes output delivered after exit and before close', as
   const stdout = new PassThrough()
   const stderr = new PassThrough()
   Object.assign(child, { stdout, stderr })
-  const output = await outputOf(child)
+  const output = await readChildOutput(child)
   const finished = collectExit(child, output)
   child.emit('exit', 0, null)
   stdout.write('last stdout')

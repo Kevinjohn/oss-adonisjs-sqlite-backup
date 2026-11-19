@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 
 /**
  * Where the snapshot taken before migrating is written: `pre-migration` under the configured
@@ -8,6 +8,6 @@ import { realPath } from './paths.js'
  */
 export function preMigrationBackupDirectory(dbPath: string, configuredDirectory?: string): string {
   return configuredDirectory
-    ? join(realPath(configuredDirectory), 'pre-migration')
-    : `${realPath(dbPath)}.backups`
+    ? join(resolveFilesystemPath(configuredDirectory), 'pre-migration')
+    : `${resolveFilesystemPath(dbPath)}.backups`
 }

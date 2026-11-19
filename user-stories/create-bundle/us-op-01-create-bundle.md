@@ -13,7 +13,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 
 - `DbBackup.run` prepares the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
 - `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
-- The copy is made using SQLite backup, journal and migration metadata are checked, `checkDatabase()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
+- The copy is made using SQLite backup, journal and migration metadata are checked, `readDatabaseIntegrityProblem()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
 - Verification uses package-opened SQLite connections. SQL functions, collations or extensions registered only on the application's connection are not registered on those handles. A schema that depends on them, such as an expression index using an application-registered function, may fail verification; create fails closed and does not publish the bundle. There is no connection initializer hook.
 - The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
 - Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
@@ -57,10 +57,10 @@ flowchart TD
     L --> Q
     Q -->|Yes| R["Throw E_BACKUP_UNSAFE"]
     Q -->|No| S["mkdir bundle directory; this call now owns it"]
-    S --> N["Read source migrationRows"]
+    S --> N["Read source migration rows"]
     N --> F["NativeDatabase.backup to db.sqlite"]
     F --> M["Checkpoint copy; set copy journal_mode DELETE"]
-    M --> G["Verify copied migrationRows; checkDatabase and sha256File"]
+    M --> G["Verify copied migration rows; readDatabaseIntegrityProblem and hashFileSha256"]
     G --> H["writeDurable manifest then READY"]
     H --> I["Return result"]
     K --> V["Catch: rmSync bundle only if this call created it"]

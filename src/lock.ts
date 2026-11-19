@@ -4,7 +4,7 @@ import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
 import { BackupException } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 import { LOCK_FILE } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 
@@ -13,10 +13,10 @@ export interface DirectoryLock {
 }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
-const localLocks = new Map<string, WeakRef<NativeDatabase>>()
+const localLockHandlesByPath = new Map<string, WeakRef<NativeDatabase>>()
 export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
 
-export function validateLockTimeout(timeoutMs: number): void {
+export function assertLockTimeout(timeoutMs: number): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
     throw new BackupException(
       'E_BACKUP_UNSAFE',
@@ -25,7 +25,7 @@ export function validateLockTimeout(timeoutMs: number): void {
   }
 }
 
-function tryLock(path: string, timeoutMs: number): NativeDatabase {
+function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
   try {
     handle = openDatabase(path, { timeout: timeoutMs })
@@ -84,8 +84,8 @@ function truncateLockFile(path: string): void {
  * file another process has just locked changes nothing.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
-  validateLockTimeout(timeoutMs)
-  const path = join(realPath(directory), LOCK_FILE)
+  assertLockTimeout(timeoutMs)
+  const path = join(resolveFilesystemPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
     throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`)
@@ -93,8 +93,8 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   let handle: NativeDatabase
   try {
     // A holder on this event loop cannot make progress while SQLite waits synchronously.
-    const wait = localLocks.get(path)?.deref()?.inTransaction ? 0 : timeoutMs
-    handle = tryLock(path, wait)
+    const wait = localLockHandlesByPath.get(path)?.deref()?.inTransaction ? 0 : timeoutMs
+    handle = acquireNativeLock(path, wait)
   } catch (error) {
     if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
     const code = (error as { code?: string }).code
@@ -109,7 +109,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     return acquireLock(directory, timeoutMs)
   }
   const reference = new WeakRef(handle)
-  localLocks.set(path, reference)
+  localLockHandlesByPath.set(path, reference)
   let released = false
   return {
     release() {
@@ -127,7 +127,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       try {
         handle.close()
         released = true
-        if (localLocks.get(path) === reference) localLocks.delete(path)
+        if (localLockHandlesByPath.get(path) === reference) localLockHandlesByPath.delete(path)
       } catch (error) {
         closeError = error
         closeFailed = true
@@ -147,7 +147,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
 
 /** Wait for a create lock without blocking the event loop needed by an in-process backup. */
 export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
-  validateLockTimeout(timeoutMs)
+  assertLockTimeout(timeoutMs)
   const deadline = performance.now() + timeoutMs
   while (true) {
     try {

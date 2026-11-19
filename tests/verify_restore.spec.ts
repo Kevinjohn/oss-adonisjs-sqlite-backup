@@ -16,9 +16,9 @@ import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { openDatabase } from '../src/native.js'
 import { prepareRestore } from '../src/restore.js'
-import { countItems, makeLiveDatabase, overwrite, tempRoot } from './helpers.js'
+import { countItems, makeLiveDatabase, overwrite, createTemporaryRoot } from './helpers.js'
 
-const codeOf = (fn: () => unknown) => {
+const readBackupErrorCode = (fn: () => unknown) => {
   try {
     fn()
   } catch (error) {
@@ -35,7 +35,7 @@ test.group('verify and prepareRestore', (group) => {
   let name: string
   let path: string
   group.each.setup(async () => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     live = join(root, 'live.db')
     directory = join(root, 'b')
     makeLiveDatabase(live).close()
@@ -55,19 +55,19 @@ test.group('verify and prepareRestore', (group) => {
     chmodSync(db, 0o600)
     overwrite(db, 4096 * 2, 'garbage')
     assert.equal(
-      codeOf(() => verifyBundle(directory, name)),
+      readBackupErrorCode(() => verifyBundle(directory, name)),
       'E_BACKUP_INVALID'
     )
     unlinkSync(join(path, 'READY'))
     assert.equal(
-      codeOf(() => verifyBundle(directory, name)),
+      readBackupErrorCode(() => verifyBundle(directory, name)),
       'E_BACKUP_INVALID'
     )
     writeFileSync(join(path, 'READY'), '')
     chmodSync(join(path, 'manifest.json'), 0o600)
     writeFileSync(join(path, 'manifest.json'), '{"format":2}')
     assert.equal(
-      codeOf(() => verifyBundle(directory, name)),
+      readBackupErrorCode(() => verifyBundle(directory, name)),
       'E_BACKUP_INVALID'
     )
   })
@@ -97,15 +97,15 @@ test.group('verify and prepareRestore', (group) => {
 
   test('bundle lookup errors', async ({ assert }) => {
     assert.equal(
-      codeOf(() => verifyBundle(directory, 'bak-utc-20000101-000000-000')),
+      readBackupErrorCode(() => verifyBundle(directory, 'bak-utc-20000101-000000-000')),
       'E_BACKUP_NOT_FOUND'
     )
     assert.equal(
-      codeOf(() => verifyBundle(directory, '../live.db')),
+      readBackupErrorCode(() => verifyBundle(directory, '../live.db')),
       'E_BACKUP_UNSAFE'
     )
     assert.equal(
-      codeOf(() => verifyBundle(join(root, 'empty'))),
+      readBackupErrorCode(() => verifyBundle(join(root, 'empty'))),
       'E_BACKUP_NOT_FOUND'
     )
   })
@@ -156,11 +156,11 @@ test.group('verify and prepareRestore', (group) => {
     }
     const target = join(root, 'staged.db ')
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_UNSAFE'
     )
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target: `${live} `, livePath: live })),
+      readBackupErrorCode(() => prepareRestore({ directory, target: `${live} `, livePath: live })),
       'E_BACKUP_UNSAFE'
     )
     assert.isFalse(existsSync(target))
@@ -183,14 +183,14 @@ test.group('verify and prepareRestore', (group) => {
     const target = join(root, 'staged.db')
     writeFileSync(`${target}-wal`, 'stale')
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_UNSAFE'
     )
     assert.isFalse(existsSync(target))
     rmSync(`${target}-wal`)
     writeFileSync(target, 'existing')
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_UNSAFE'
     )
   })
@@ -201,7 +201,7 @@ test.group('verify and prepareRestore', (group) => {
     overwrite(db, 4096 * 2, 'garbage')
     const target = join(root, 'staged.db')
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target, livePath: live })),
+      readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
       'E_BACKUP_INVALID'
     )
     assert.isFalse(existsSync(target))
@@ -248,7 +248,9 @@ test.group('verify and prepareRestore', (group) => {
     }
     rmSync(join(path, 'db.sqlite'))
     assert.equal(
-      codeOf(() => prepareRestore({ directory, target: join(root, 'b.db'), livePath: live })),
+      readBackupErrorCode(() =>
+        prepareRestore({ directory, target: join(root, 'b.db'), livePath: live })
+      ),
       'E_BACKUP_INVALID'
     )
   })

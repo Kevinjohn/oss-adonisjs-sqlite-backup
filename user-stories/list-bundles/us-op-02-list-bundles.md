@@ -38,12 +38,12 @@ Scope: read-only listing through bundle metadata; no lock is acquired.
 ```mermaid
 flowchart TD
     A["DbBackup.run list case"] --> B["SqliteBackup.list(directory)"]
-    B --> C["directory() chooses override or config"]
+    B --> C["requireBackupDirectory chooses override or config"]
     C --> D["listBundles"]
-    D --> E["bundleDirectories filters and sorts real bundle dirs"]
+    D --> E["listBundleDirectoryNames filters and sorts real bundle dirs"]
     E --> F["READY marker filter"]
     F --> G["readManifest reads createdAt"]
     G --> H["Return BundleSummary list to logger"]
 ```
 
-**Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [listBundles and bundleDirectories](../../src/bundles.ts), [listing contract](../../README.md#service-and-configuration).
+**Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [listBundles and listBundleDirectoryNames](../../src/bundles.ts), [listing contract](../../README.md#service-and-configuration).

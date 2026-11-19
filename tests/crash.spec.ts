@@ -9,20 +9,24 @@ import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
 import { acquireLock } from '../src/lock.js'
 import { pruneBundles } from '../src/prune.js'
-import { makeLiveDatabase, runChild, tempRoot } from './helpers.js'
+import { makeLiveDatabase, runChild, createTemporaryRoot } from './helpers.js'
 
-const bundleDirs = (directory: string) =>
+const listBundleDirectories = (directory: string) =>
   readdirSync(directory)
     .filter((name) => name.startsWith('bak-utc-'))
     .sort()
 
+interface RecoveryExpectation {
+  live: string
+  directory: string
+  ready: string[]
+  unfinished: string
+}
+
 /** The four post-crash guarantees. */
 async function assertRecovers(
   assert: import('@japa/assert').Assert,
-  live: string,
-  directory: string,
-  ready: string[],
-  unfinished: string
+  { live, directory, ready, unfinished }: RecoveryExpectation
 ) {
   assert.deepEqual(
     listBundles(directory).map((bundle) => bundle.name),
@@ -35,7 +39,7 @@ async function assertRecovers(
   const result = pruneBundles({ directory, keep: 100 })
   assert.deepEqual(result.abandoned, [unfinished], 'prune removes the unfinished folder')
   assert.deepEqual(result.removed, [], 'prune leaves READY bundles')
-  assert.deepEqual(bundleDirs(directory), [...ready, next.name].sort())
+  assert.deepEqual(listBundleDirectories(directory), [...ready, next.name].sort())
   for (const name of [...ready, next.name]) verifyBundle(directory, name)
 }
 
@@ -43,7 +47,7 @@ test.group('crash safety', (group) => {
   let root: string
   let cleanup: () => void
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     return () => cleanup()
   })
 
@@ -58,7 +62,7 @@ test.group('crash safety', (group) => {
 
       const run = await runChild('crash-create', live, directory, at)
       assert.equal(run.signal, 'SIGKILL', `child output: ${run.messages.join(', ')}`)
-      const [unfinished] = bundleDirs(directory).filter((name) => !ready.includes(name))
+      const [unfinished] = listBundleDirectories(directory).filter((name) => !ready.includes(name))
       assert.isDefined(unfinished, 'the crash left an unfinished folder')
       const files = readdirSync(join(directory, unfinished!))
       assert.notInclude(files, 'READY')
@@ -71,7 +75,7 @@ test.group('crash safety', (group) => {
       }
       if (at === 'create:manifest') assert.include(files, 'manifest.json')
 
-      await assertRecovers(assert, live, directory, ready, unfinished!)
+      await assertRecovers(assert, { live, directory, ready, unfinished: unfinished! })
     }).timeout(60_000)
   }
 
@@ -91,6 +95,6 @@ test.group('crash safety', (group) => {
     assert.isTrue(existsSync(join(directory, victim!)), 'killed before removal')
     assert.isFalse(existsSync(join(directory, victim!, 'READY')), 'unpublished first')
 
-    await assertRecovers(assert, live, directory, rest, victim!)
+    await assertRecovers(assert, { live, directory, ready: rest, unfinished: victim! })
   }).timeout(60_000)
 })

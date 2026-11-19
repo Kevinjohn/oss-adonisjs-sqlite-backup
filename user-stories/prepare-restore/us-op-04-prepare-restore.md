@@ -47,13 +47,13 @@ Scope: prepare-only copy through verification; host-controlled cutover is outsid
 ```mermaid
 flowchart TD
     A["DbBackup.run restore-prepare case"] --> B["Require target and call SqliteBackup.prepareRestore"]
-    B --> C["resolve paths; assertDirectory(root, private) refuses a group/other-writable root with E_BACKUP_UNSAFE"]
+    B --> C["resolve paths; assertDirectory(root, { requirePrivateRoot: true }) refuses a group/other-writable root with E_BACKUP_UNSAFE"]
     C --> D["Reject live/sidecar, existing target, missing parent or backup-root target"]
-    D --> E["selectBundle and readManifest"]
+    D --> E["requireSelectedBundle and readManifest"]
     E --> F["copyFileSync with COPYFILE_EXCL"]
     F --> G["chmod target 0600 and assertMatchesManifest"]
     G --> H{"Path and verification valid?"}
-    H -->|No| I["Attempt removal only where ours(path) confirms ownership"]
+    H -->|No| I["Attempt removal only where matchesCreatedRestoreFile(path) confirms ownership"]
     I --> K{"Removal throws?"}
     K -->|Yes| L["Attach cleanupError to original Error; throw original failure"]
     K -->|No| M["Throw original failure"]

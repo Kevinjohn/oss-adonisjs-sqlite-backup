@@ -181,13 +181,13 @@ async function runOperatorDatabase<T>(
       disconnectCount: 0,
     }
     captured.push(record)
-    const disconnect = (error: unknown) => {
+    const recordDisconnectError = (error: unknown) => {
       errors.push(error)
       record.disconnectCount++
       if (name === db.primaryConnectionName) primaryCleanupObserved = true
     }
-    connection.on('disconnect:error', disconnect)
-    listeners.push(() => connection.removeListener('disconnect:error', disconnect))
+    connection.on('disconnect:error', recordDisconnectError)
+    listeners.push(() => connection.removeListener('disconnect:error', recordDisconnectError))
     for (const [role, pool] of [
       ['write', connection.client?.client?.pool],
       ['read', connection.readClient?.client?.pool],
@@ -200,19 +200,19 @@ async function runOperatorDatabase<T>(
       }
       const state = { pool, roles: [role], completed: false }
       record.pools.push(state)
-      const destroy = (_id: unknown, _resource: unknown, error: unknown) => {
+      const recordPoolDestroyFailure = (_id: unknown, _resource: unknown, error: unknown) => {
         errors.push(error)
         if (name === db.primaryConnectionName && pool === owner) primaryCleanupObserved = true
       }
-      const complete = () => {
+      const recordPoolDestroyed = () => {
         state.completed = true
-        connection.removeListener('disconnect:error', disconnect)
-        connection.on('disconnect:error', disconnect)
+        connection.removeListener('disconnect:error', recordDisconnectError)
+        connection.on('disconnect:error', recordDisconnectError)
       }
-      pool.on('destroyFail', destroy)
-      pool.on('poolDestroySuccess', complete)
-      listeners.push(() => pool.removeListener('destroyFail', destroy))
-      listeners.push(() => pool.removeListener('poolDestroySuccess', complete))
+      pool.on('destroyFail', recordPoolDestroyFailure)
+      pool.on('poolDestroySuccess', recordPoolDestroyed)
+      listeners.push(() => pool.removeListener('destroyFail', recordPoolDestroyFailure))
+      listeners.push(() => pool.removeListener('poolDestroySuccess', recordPoolDestroyed))
     }
   }
   let managerFailed = false

@@ -24,7 +24,7 @@ import { defineConfig } from '../src/define_config.js'
 import type { BackupConfigInput } from '../src/types.js'
 import { openDatabase } from '../src/native.js'
 import { preMigrationBackupDirectory } from '../index.js'
-import { startChild, stopChild, tempRoot } from './helpers.js'
+import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 // Migration files live in a temporary directory, so they import Lucid by absolute URL.
 const schemaModule = pathToFileURL(createRequire(import.meta.url).resolve('@adonisjs/lucid/schema'))
@@ -112,7 +112,7 @@ test.group('db:upgrade', (group) => {
   let root: string
   let app: ApplicationService | undefined
   group.each.setup(() => {
-    const temp = tempRoot()
+    const temp = createTemporaryRoot()
     root = temp.root
     return async () => {
       await app?.terminate()

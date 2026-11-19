@@ -13,10 +13,10 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { checkDatabase } from '../src/checks.js'
+import { readDatabaseIntegrityProblem } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
-import { bundleName } from '../src/names.js'
+import { requireFormattedBundleName } from '../src/names.js'
 import { openDatabase } from '../src/native.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
 import {
@@ -25,7 +25,7 @@ import {
   overwrite,
   startChild,
   stopChild,
-  tempRoot,
+  createTemporaryRoot,
   within,
 } from './helpers.js'
 
@@ -35,7 +35,7 @@ test.group('createBundle', (group) => {
   let root: string
   let cleanup: () => void
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     return () => cleanup()
   })
 
@@ -381,16 +381,18 @@ test.group('createBundle', (group) => {
     }
   })
 
-  test('checkDatabase reports page corruption', async ({ assert }) => {
+  test('readDatabaseIntegrityProblem reports page corruption', async ({ assert }) => {
     const path = join(root, 'corrupt.db')
     makeLiveDatabase(path, { rows: 2000, wal: false }).close()
-    assert.isNull(checkDatabase(path))
+    assert.isNull(readDatabaseIntegrityProblem(path))
     overwrite(path, 4096 * 40, 'zzzzzzzzzzzz') // page header, not row text
-    assert.isNotNull(checkDatabase(path))
-    assert.match(checkDatabase(join(root, 'missing.db'))!, /cannot open/)
+    assert.isNotNull(readDatabaseIntegrityProblem(path))
+    assert.match(readDatabaseIntegrityProblem(join(root, 'missing.db'))!, /cannot open/)
   })
 
-  test('checkDatabase reports an index that disagrees with its table', async ({ assert }) => {
+  test('readDatabaseIntegrityProblem reports an index that disagrees with its table', async ({
+    assert,
+  }) => {
     const path = join(root, 'index.db')
     const db = openDatabase(path)
     db.exec(
@@ -403,7 +405,10 @@ test.group('createBundle', (group) => {
     db.close()
     // Change one key inside the index leaf: the file stays readable, integrity_check returns rows.
     overwrite(path, rootPage * 4096 - 8, 'zzzz')
-    assert.equal(checkDatabase(path), 'integrity_check: row 1 missing from index small_k')
+    assert.equal(
+      readDatabaseIntegrityProblem(path),
+      'integrity_check: row 1 missing from index small_k'
+    )
   })
 
   test('a non-WAL source warns, or fails when WAL is required', async ({ assert }) => {
@@ -435,7 +440,7 @@ test.group('createBundle', (group) => {
       prepared({ livePath: live, directory, now: () => t - 23 * 3_600_000 })
     )
     assert.isTrue(second.name > first.name)
-    assert.equal(second.name, bundleName(t + 1))
+    assert.equal(second.name, requireFormattedBundleName(t + 1))
     // Back 25 h: refused instead of naming a bundle a day ahead of the clock.
     await assert.rejects(
       () => createBundle(prepared({ livePath: live, directory, now: () => t - 25 * 3_600_000 })),

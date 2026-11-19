@@ -2,7 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
 
 /** Collect a child's stdout and stderr as it runs. */
-export async function outputOf(child: ChildProcess): Promise<{ text: () => string }> {
+export async function readChildOutput(child: ChildProcess): Promise<{ text: () => string }> {
   let output = ''
   child.stdout!.setEncoding('utf8').on('data', (chunk: string) => (output += chunk))
   child.stderr!.setEncoding('utf8').on('data', (chunk: string) => (output += chunk))

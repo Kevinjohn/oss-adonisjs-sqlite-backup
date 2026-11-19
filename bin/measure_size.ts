@@ -61,9 +61,9 @@ if (role === 'writer') {
 } else {
   const root = join(process.cwd(), 'tmp', `size-${process.pid}`)
   const live = join(root, 'live.db')
-  const mb = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
+  const formatMebibytes = (bytes: number) => (bytes / 1024 / 1024).toFixed(1)
   let removeRoot = true
-  const time = async <T>(fn: () => T | Promise<T>) => {
+  const measureElapsedTime = async <T>(fn: () => T | Promise<T>) => {
     const started = performance.now()
     const value = await fn()
     return { value, ms: Math.round(performance.now() - started) }
@@ -84,7 +84,7 @@ if (role === 'writer') {
       }
       seed.pragma('wal_checkpoint(TRUNCATE)')
     })
-    console.log(`database: ${mb(statSync(live).size)} MB, 600000 rows`)
+    console.log(`database: ${formatMebibytes(statSync(live).size)} MB, 600000 rows`)
 
     for (const mode of ['wal', 'delete']) {
       const set = openDatabase(live)
@@ -103,16 +103,20 @@ if (role === 'writer') {
           await withSampler(sampler, async () => {
             const directory = join(root, `bundles-${mode}`)
             prepareDirectory(directory)
-            const created = await time(() => createBundle({ livePath: live, directory }))
+            const created = await measureElapsedTime(() =>
+              createBundle({ livePath: live, directory })
+            )
             const peakWal = await waitForSamplerPeak(sampler)
             const stats = await stopWriter(writer)
-            const verified = await time(() => verifyBundle(directory, created.value.name))
-            const restored = await time(() =>
+            const verified = await measureElapsedTime(() =>
+              verifyBundle(directory, created.value.name)
+            )
+            const restored = await measureElapsedTime(() =>
               prepareRestore({ directory, target: join(root, `staged-${mode}.db`), livePath: live })
             )
             console.log(
               `${mode}: create ${created.ms} ms, verify ${verified.ms} ms, restore-prepare ${restored.ms} ms, ` +
-                `peak WAL ${mb(peakWal)} MB, writer: ${stats.writes} writes, max ${stats.max.toFixed(1)} ms, ${stats.busy} busy errors`
+                `peak WAL ${formatMebibytes(peakWal)} MB, writer: ${stats.writes} writes, max ${stats.max.toFixed(1)} ms, ${stats.busy} busy errors`
             )
             rmSync(directory, { recursive: true, force: true })
             rmSync(join(root, `staged-${mode}.db`), { force: true })
