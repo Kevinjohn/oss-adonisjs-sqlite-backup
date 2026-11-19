@@ -51,7 +51,8 @@ not read it, such as `prune --bundle`, is refused.
 The provider still boots; service operations without a recovery directory fail with
 `E_BACKUP_DISABLED`. Retention defaults to seven READY bundles.
 The directory lock timeout (`lockTimeoutMs`) defaults to 0 and accepts integer milliseconds from
-0 through 2,147,483,647.
+0 through 2,147,483,647. Prune reports `E_BACKUP_LOCKED` immediately if a backup lock on the
+same event loop is already held. It can wait up to the timeout for a lock held in another process.
 
 At application startup, call `backup.checkSource()` and `backup.prepareDirectory()` once before
 scheduling `backup.create()` followed by `backup.prune()`. Preparation creates missing directories
@@ -59,6 +60,8 @@ and tightens an existing directory to mode `0700`; an existing non-directory roo
 manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
+Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
+provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
 
