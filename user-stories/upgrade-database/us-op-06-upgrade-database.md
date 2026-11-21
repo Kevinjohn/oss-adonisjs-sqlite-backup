@@ -35,7 +35,7 @@ flowchart TD
     F -->|No| C
     F -->|Yes| G
     G --> H{"Migrations succeed?"}
-    H -->|No| I["See migration error; restore-prepare from the bundle if needed"]
+    H -->|No| I["See migration error; restore-prepare if a bundle was written"]
     H -->|Yes| J["Generate schema if enabled outside production"]
     J --> K["Report completion or generator failure"]
 ```
@@ -49,18 +49,25 @@ flowchart TD
     A["DbUpgrade.run"] --> B["Make lucid.db; read primary connection config"]
     B --> C{"client is better-sqlite3?"}
     C -->|No| X["Throw; catch logs Upgrade failed; exitCode 1"]
-    C -->|Yes| D["Query sqlite_master for a table"]
+    C -->|Yes| D["Normalise configured filename; query sqlite_master for a table"]
     D --> E{"dbPath is not :memory: and a table exists?"}
     E -->|No| H["kernel.exec migration:run --force --no-schema-generate"]
-    E -->|Yes| F["preMigrationBackupDirectory; prepareDirectory"]
+    E -->|Yes| F1{"Filename is nonempty and not a URI?"}
+    F1 -->|No| X
+    F1 -->|Yes| F["preMigrationBackupDirectory; assertSafeLayout; prepareDirectory"]
+    F -->|Failure| X
     F --> G["createBundle with livePath, directory, migrations table, lockTimeoutMs and requireWal; log warnings"]
     G -->|failure| X
     G -->|success| H
-    H --> I{"migrate.exitCode is 0?"}
+    H -->|Throws| X
+    H -->|Returns| I{"migrate.exitCode is 0?"}
     I -->|No| J["Copy migrate.error and exit code"]
     I -->|Yes| K{"Generation enabled outside production?"}
     K -->|No| L["Finish successfully"]
-    K -->|Yes| M["Run schema:generate for primary connection and propagate failure"]
+    K -->|Yes| M["Run schema:generate for primary connection"]
+    M -->|Throws| X
+    M -->|Nonzero or absent exit code| N["Copy generator error and exit code, default 1"]
+    M -->|Exit code 0| L
 ```
 
 **Code references:** [command](../../commands/db_upgrade.ts), [pre-migration backup directory](../../src/upgrade.ts), [createBundle](../../src/bundles.ts), [upgrade tests](../../tests/upgrade.spec.ts), [README upgrade contract](../../README.md#upgrading-a-database).

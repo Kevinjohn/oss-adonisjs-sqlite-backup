@@ -45,13 +45,19 @@ Scope: operator setup and backup-root behavior in service and command entry poin
 
 ```mermaid
 flowchart TD
-    A["configure(command) writes config and registers provider and command loader"] --> B["Provider binds SqliteBackup"]
-    B --> C{"Which operation starts?"}
+    A["configure(command) writes config and registers provider and command loader"] --> B["Provider registers lazy singleton"]
+    B --> B1{"Backup config present and valid?"}
+    B1 -->|No| X["Throw missing config or validation error when resolved"]
+    B1 -->|Yes| C{"Which operation starts?"}
+    C -->|checkSource| S["Resolve enabled source; open read-only, probe schema and close"]
+    C -->|prepareDirectory| P["Create or tighten root to 0700"]
+    C -->|Recovery action| R["Use supplied directory or configured root; restore also resolves live path"]
     C -->|Service create or prune| D["Use configured root without preparing it"]
     D --> E{"Does the root already exist?"}
     E -->|No| F["Fail; direct service call does not recreate the root"]
     E -->|Yes| G["Create bundle or prune retained bundles"]
-    C -->|db:backup create| H["Command calls prepareDirectory"]
+    C -->|db:backup create| H1["Check source/root layout"]
+    H1 --> H["Command calls prepareDirectory"]
     H --> I["Command calls backup.create"]
     I --> J["Create bundle in prepared root"]
 ```

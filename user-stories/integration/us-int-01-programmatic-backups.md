@@ -32,12 +32,16 @@ flowchart TD
 flowchart TD
     A["SqliteBackup.create or createBundle"] --> B["Resolve source and validate layout"]
     B --> C["Acquire archive lock"]
-    C --> D["Open owned source or use borrowed handle"]
+    C -->|Acquired| D["Open owned source or use borrowed handle"]
+    C -->|Refused| X["Throw without releasing an unacquired lock"]
     D --> E["Copy, check and publish"]
-    E --> F["Close owned handle and release lock"]
+    E --> F["Attempt owned handle close and lock release"]
     D -->|Source refusal| F
     E -->|Failure| G["Attempt owned bundle cleanup"]
     G --> F
+    F -->|Success and no prior failure| H["Return bundle result"]
+    F -->|Prior failure| I["Throw with any cleanup diagnostics"]
+    F -->|Cleanup failure only| J["Attempt to unpublish and remove bundle; throw"]
 ```
 
 **Source and coverage:** [Service](../../src/sqlite_backup.ts), [source lookup](../../src/source.ts), [create](../../src/bundles.ts), [adoption scenarios](../../tests/adoption.spec.ts), [application tests](../../tests/app.spec.ts), [create tests](../../tests/create.spec.ts).

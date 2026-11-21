@@ -18,7 +18,7 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 
 - `verifyBundle()` selects a real directory, requires READY, parses the format-1 manifest, and checks file size, SHA-256, full SQLite integrity/foreign-key checks, and optional migration metadata.
 - A `--bundle` value that is not a valid bundle name, or that names something other than a real directory (for example a file or symlink), is refused with `E_BACKUP_UNSAFE` before any check runs. A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. Default newest selection reports `E_BACKUP_NOT_FOUND` if prune unpublishes it. A named selection may report `E_BACKUP_INVALID` for a missing READY marker when unpublication occurs before its readiness snapshot.
-- Verification is read-only and lock-free; a concurrent prune may cause the operation to fail.
+- Verification is read-only and lock-free; a concurrent prune may cause the operation to fail. A successful check does not recheck READY after validation or guarantee continued publication.
 
 - READY, manifest and database must be regular files. A format-1 manifest may omit migrations. With migration metadata, verify compares the declared main journal’s row count and final name in ID order. It counts every foreign-key violation using an iterator. Default selection reads the chosen manifest without parsing older malformed manifests. [Recovery scenarios](../../tests/adoption.spec.ts), [regular-file tests](../../tests/verify_restore.spec.ts), [SQLite checks](../../src/checks.ts)
 
@@ -46,15 +46,22 @@ Scope: lock-free bundle selection and verification.
 flowchart TD
     A["DbBackup.run verify case"] --> B["SqliteBackup.verify(name, directory)"]
     B --> C["verifyBundle"]
-    C --> D["requireSelectedBundle: requireBundleTimestamp, lstat"]
+    C --> S{"Name supplied?"}
+    S -->|Yes| D["requireSelectedBundle: requireBundleTimestamp, lstat"]
+    S -->|No| B1["List real bundle directories; choose newest with READY"]
+    B1 -->|None| N
+    B1 --> E1["Record prior READY presence"]
     D -->|Invalid name or not a directory| X["Throw E_BACKUP_UNSAFE"]
     D -->|No entry with that name| N["Throw E_BACKUP_NOT_FOUND"]
-    D --> E["readManifest"]
+    D --> E1
+    E1 --> E["readManifest"]
     E --> F["assertMatchesManifest"]
     F --> G["Check size, sha256, readDatabaseIntegrityProblem and assertMigrations"]
-    G --> H{"READY still published and checks pass?"}
-    H -->|No| I["Throw E_BACKUP_NOT_FOUND or E_BACKUP_INVALID"]
-    H -->|Yes| J["Return selected BundleLocation"]
+    E -->|Failure| H{"Was READY and now absent?"}
+    G -->|Failure| H
+    H -->|Yes| I["Throw E_BACKUP_NOT_FOUND"]
+    H -->|No| K["Rethrow original error"]
+    G -->|Success| J["Return selected BundleLocation"]
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [verifyBundle and assertions](../../src/bundles.ts), [checks](../../src/checks.ts), [verify tests](../../tests/verify_restore.spec.ts).

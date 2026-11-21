@@ -30,7 +30,9 @@ As a host operator, I want to guard a custom Ace command with `operatorDatabaseP
 flowchart TD
     A["Operator stops the server and runs the host command with --confirm-server-stopped"] --> B{"Confirmed, single-connection SQLite, existing file?"}
     B -->|No| C["See refusal; fix flag or pool configuration"]
-    B -->|Yes| D{"Exclusive lock obtained?"}
+    B -->|Yes| O{"Another operator owns this Database?"}
+    O -->|Yes| X2["See overlapping operator refusal"]
+    O -->|No| D{"Exclusive lock obtained?"}
     D -->|No| E["See contention advice or the original setup error; resolve the cause"]
     D -->|Yes| F["Command work runs on the locked handle"]
     F --> G["Pool close attempted; command reports its result or error"]
@@ -46,22 +48,31 @@ flowchart TD
     A["Host command"] --> B["operatorDatabasePath(db, confirmServerStopped)"]
     B -->|Refused| X["Throw before any connection is opened"]
     B -->|Path returned| C["withOperatorDatabase(db, run)"]
-    C --> D["Check out the original native handle"]
+    C --> C1{"Already active for this Database?"}
+    C1 -->|Yes| X1["Throw without taking cleanup ownership"]
+    C1 -->|No| D["Mark active; check out the original native handle"]
     D -->|Throws| I
     D --> S["busy_timeout 0; locking_mode EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT"]
     S -->|PRAGMA fails| P["Record that error as the lock failure"]
-    S -->|BUSY| Q["Record contention advice"]
+    S -->|BEGIN fails with SQLITE_BUSY or variant| Q["Record contention advice"]
     S -->|Other BEGIN failure| R["Record original setup error"]
-    S -->|Succeeds| H["Run callback with serialized Lucid loans of the pinned handle"]
+    S -->|Succeeds| P1["Install one-handle loan pool"]
+    P1 -->|Failure| I
+    P1 -->|Success| H["Run callback with serialised Lucid loans of the pinned handle"]
     P --> I
     Q --> I
     R --> I
     H --> I
-    I["Drain loans; release original lease; attempt to close all managed connections"]
-    I --> J{"Earlier failure or cleanup failure?"}
-    J -->|Both| K["Throw AggregateError"]
+    I["Destroy loan pool if created; restore owner pool; release original lease if held"]
+    I --> I1["Capture pool and connection cleanup events; attempt manager.closeAll"]
+    I1 --> I2["Record incomplete cleanup; attempt native close if still open"]
+    I2 --> J{"How many failures?"}
+    J -->|More than one| K["Throw AggregateError in observation order"]
     J -->|One| L["Throw it"]
     J -->|None| M["Return run result"]
+    K --> N["Finally clear active marker"]
+    L --> N
+    M --> N
 ```
 
 **Code references:** [operator helpers](../../src/operator.ts), [package exports](../../index.ts), [operator tests](../../tests/operator.spec.ts), [README operator contract](../../README.md#stopped-server-operator-commands).

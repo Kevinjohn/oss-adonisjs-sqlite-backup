@@ -15,7 +15,7 @@ As a host operator, I want to list READY bundles so that I can see available rec
 | ------------- | ----------- | ---------------------------------------------------------------------------- |
 | `--directory` | String flag | Optional; read-only override for this action; configured directory otherwise |
 
-- `listBundles()` includes only real bundle directories with READY, ordered oldest first, and prints bundle names.
+- `listBundles()` includes only real bundle directories with READY, ordered oldest first; Ace prints bundle names.
 - An existing empty directory prints no bundle names; a missing directory fails. A concurrently removed publication is skipped; a READY bundle with unreadable manifest fails and identifies the bundle.
 - Listing is lock-free and does not alter bundles. The override also works when configured operations are disabled.
 
@@ -26,11 +26,12 @@ As a host operator, I want to list READY bundles so that I can see available rec
 ```mermaid
 flowchart TD
     A["Operator runs db:backup list"] --> B{"Use configured root or --directory?"}
-    B --> C["Read backup root"]
+    B -->|Either| C["Read backup root"]
     C --> D{"Root exists and is readable?"}
     D -->|No| E["Report directory error"]
-    D -->|Yes| F["Print READY bundle names oldest first"]
-    F --> G["Empty root prints no names"]
+    D -->|Yes| F{"Published summaries readable?"}
+    F -->|No| E
+    F -->|Yes| G["Print READY names oldest first; none if empty"]
 ```
 
 ## Code flow
@@ -44,8 +45,13 @@ flowchart TD
     C --> D["listBundles"]
     D --> E["listBundleDirectoryNames filters and sorts real bundle dirs"]
     E --> F["READY marker filter"]
-    F --> G["readManifest reads createdAt"]
-    G --> H["Return BundleSummary list to logger"]
+    F -->|READY absent| X["Skip entry"]
+    F -->|READY present| G["readManifest validates marker, manifest and createdAt"]
+    G -->|Success| H["Collect BundleSummary"]
+    G -->|Publication vanished| X
+    G -->|Other manifest failure| I["Throw E_BACKUP_INVALID"]
+    H --> J["Return summaries; Ace logs names"]
+    X --> J
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [listBundles and listBundleDirectoryNames](../../src/bundles.ts), [listing contract](../../README.md#service-and-configuration).

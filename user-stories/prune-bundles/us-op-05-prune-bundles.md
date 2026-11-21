@@ -22,6 +22,7 @@ As a host operator, I want to retain only the newest configured number of READY 
 - `prune` always uses configured root; `--directory` is not accepted. If root disappears, it is not recreated during prune.
 
 - Prune counts READY presence, including a publication that listing would reject for a malformed manifest. The standalone helper takes a root and retention count. The configured service also rejects a root containing a resolvable live database. [Retention scan](../../src/prune.ts), [service](../../src/sqlite_backup.ts)
+- If archive sync or lock release fails after removals, the error includes observed progress; Ace reports observed removals, per-item failures and unconfirmed durability where applicable.
 
 ## User flow
 
@@ -31,7 +32,9 @@ flowchart TD
     B --> C{"Valid keep count and lock acquired?"}
     C -->|No| D["Report refusal or lock error"]
     C -->|Yes| E["Remove older READY bundles and unfinished directories"]
-    E --> F{"Any removal failed?"}
+    E --> S{"Archive sync and lock release succeed?"}
+    S -->|No| X["Report finalisation error and observed progress; exit nonzero"]
+    S -->|Yes| F{"Any removal failed?"}
     F -->|Yes| G["Warn for each bundle and exit nonzero"]
     F -->|No| H["Report removed and abandoned counts"]
 ```
@@ -43,13 +46,22 @@ Scope: prune command through locked directory selection and unpublication/remova
 ```mermaid
 flowchart TD
     A["DbBackup.run prune case"] --> B["SqliteBackup.prune({keep})"]
-    B --> C["pruneBundles"]
+    B --> B1["Resolve configured root; refuse if it contains resolvable live path"]
+    B1 --> C["pruneBundles"]
     C --> D["Validate keep, assertDirectory, acquireLock"]
     D --> E["listBundleDirectoryNames and split READY from unfinished"]
     E --> F["Select older READY rows and all unfinished rows"]
-    F --> G["unlink READY, syncPath, then rmSync directory"]
-    G --> H["Collect removed, abandoned and failed results"]
-    H --> I["Release lock; command warns and sets exitCode on failures"]
+    F --> G{"Entry has READY?"}
+    G -->|Yes| G1["unlink READY and syncPath bundle"]
+    G -->|No| G2["rmSync directory"]
+    G1 --> G2
+    G2 --> H["Collect removed or abandoned results; record per-item exceptions"]
+    G1 -->|Failure| H
+    H --> S["Sync archive if any removals"]
+    E -->|Fatal scan failure| I
+    S --> I["Attempt lock release"]
+    I -->|Fatal error| X["Throw with progress or cleanup diagnostics where applicable"]
+    I -->|Success and no fatal error| J["Return results; command warns and sets exitCode on per-item failures"]
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [pruneBundles](../../src/prune.ts), [lock](../../src/lock.ts), [prune tests](../../tests/prune.spec.ts).

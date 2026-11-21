@@ -23,7 +23,7 @@ As a host operator, I want to stage and verify a selected bundle at a new path s
 - Success stops at a verified copy. It never replaces the live database or changes Lucid configuration. Stopping the app, switching paths, restarting and checking data remain operator decisions; retain the old file until satisfied.
 - Operation is lock-free; a concurrently pruned source may fail verification.
 
-- Restore requires a regular marker and manifest and rejects a linked or other non-regular database member before copying. The staged file passes byte, SQLite and optional migration checks before its file and parent directory are synced. [Restore implementation](../../src/restore.ts), [regular-file regressions](../../tests/verify_restore.spec.ts)
+- Restore requires a regular marker and manifest and rejects a symbolic link or other non-regular database member before copying. The staged file passes byte, SQLite and optional migration checks before its file and parent directory are synced. [Restore implementation](../../src/restore.ts), [regular-file regressions](../../tests/verify_restore.spec.ts)
 
 ## User flow
 
@@ -31,7 +31,10 @@ As a host operator, I want to stage and verify a selected bundle at a new path s
 flowchart TD
     A["Operator selects a bundle and new target path"] --> B{"Backup root not group/other-writable, target safe and absent?"}
     B -->|No| C["Refuse before replacing any file"]
-    B -->|Yes| D["Copy bundle to staged target"]
+    B -->|Yes| S{"Selected bundle and manifest readable?"}
+    S -->|No| C
+    S -->|Yes| D["Copy bundle to staged target"]
+    D -->|Copy fails| C
     D --> E["Verify staged copy against manifest"]
     E --> F{"Copy verifies?"}
     F -->|No| G["Report failure; attempt owned staged-file cleanup"]
@@ -49,17 +52,21 @@ Scope: prepare-only copy through verification; host-controlled cutover is outsid
 ```mermaid
 flowchart TD
     A["DbBackup.run restore-prepare case"] --> B["Require target and call SqliteBackup.prepareRestore"]
-    B --> C["resolve paths; assertDirectory(root, { requirePrivateRoot: true }) refuses a group/other-writable root with E_BACKUP_UNSAFE"]
+    B --> B1["Resolve target; reject trailing slash or driver-reinterpreted filename"]
+    B1 --> C["resolve paths; assertDirectory(root, { requirePrivateRoot: true }) refuses a group/other-writable root with E_BACKUP_UNSAFE"]
     C --> D["Reject live/sidecar, existing target, missing parent or backup-root target"]
     D --> E["requireSelectedBundle and readManifest"]
-    E --> F["copyFileSync with COPYFILE_EXCL"]
-    F --> G["chmod target 0600 and assertMatchesManifest"]
-    G --> H{"Path and verification valid?"}
+    E --> F["Check source is regular; copyFileSync with COPYFILE_EXCL"]
+    F -->|Copy fails| X["Classify existing target, pruned or missing database; otherwise preserve error"]
+    F -->|Copy succeeds| G1["Capture staged identity and resolved path"]
+    G1 --> H{"Target stayed at intended path?"}
     H -->|No| I["Attempt removal only where matchesCreatedRestoreFile(path) confirms ownership"]
     I --> K{"Removal throws?"}
     K -->|Yes| L["Attach cleanupError to original Error; throw original failure"]
     K -->|No| M["Throw original failure"]
-    H -->|Yes| J["Return bundle and target; never swap live file"]
+    H -->|Yes| G["chmod 0600, assertMatchesManifest, sync target and parent"]
+    G -->|Failure| I
+    G -->|Success| J["Return bundle and target; never swap live file"]
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [prepareRestore](../../src/restore.ts), [path safety](../../src/paths.ts), [README restore contract](../../README.md#restoring).

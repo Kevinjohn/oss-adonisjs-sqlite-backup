@@ -25,11 +25,17 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Validate timeout and lock path"] --> B["Acquire SQLite transaction"]
+    A["Validate timeout and lock path"] --> B["Acquire SQLite BEGIN EXCLUSIVE transaction"]
     B -->|Busy| C["Raise E_BACKUP_LOCKED"]
+    B -->|Damaged| G["Check singly linked regular file; truncate safely"]
+    G -->|Safe| A
+    G -->|Refused| H["Throw"]
+    B -->|Other error| H
     B -->|Held| D["Return DirectoryLock"]
     D --> E["release attempts rollback then close"]
     E -->|Close failed| F["Report error and allow retry"]
+    E -->|Close succeeds| I["Mark released; throw rollback error if any"]
+    I --> J["Later release is a no-op"]
 ```
 
 **Source and coverage:** [Lock implementation](../../src/lock.ts), [process contention, cleanup and recovery tests](../../tests/lock.spec.ts), [damaged lock regressions](../../tests/rereview.spec.ts).
