@@ -29,3 +29,8 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      - name: Exercise the installed package in a fresh host
+        run: |
+          mkdir -p tmp
+          pnpm pack --out tmp/packed-consumer.tgz
+          node bin/packed_consumer.mjs tmp/packed-consumer.tgz
