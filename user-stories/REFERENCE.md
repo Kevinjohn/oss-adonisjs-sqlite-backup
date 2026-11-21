@@ -2,7 +2,7 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`6f0dd18c2404559334749799762e3dfde0852a22`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/6f0dd18c2404559334749799762e3dfde0852a22). Inventory covers Ace actions/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Fetched `origin/main` baseline: [`26b305a36908998114179409a57ead8acfac20b0`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/26b305a36908998114179409a57ead8acfac20b0). Inventory covers Ace actions/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
@@ -36,17 +36,17 @@ Standalone exports are in [the package index](../index.ts). The [README](../READ
 `createBundle()` reads the live source journal mode without changing it. A non-WAL source is
 allowed with a warning unless `requireWal` is enabled, in which case create refuses. Only the
 backup copy is checkpointed and changed to `journal_mode=DELETE`. The copied migration rows must
-match the source SQLite read snapshot; the copy must pass integrity and foreign-key checks before the
+match the journal read from the source before copying; the copy must pass integrity and foreign-key checks before the
 read-only database and SHA-256 manifest are written. `READY` is written last, so only a checked,
 published bundle is a recovery point.
 
-After `acquireLock()` succeeds, `createBundle()` calls `lock.release()` in `finally` on success,
+After the asynchronous create-lock acquisition succeeds, `createBundle()` calls `lock.release()` in `finally` on success,
 source refusal or operation failure, and closes only a source handle it opened itself. If the
 operation fails, it attempts to remove a bundle directory only after this call created it. Removal
 is best effort: the original failure is rethrown, with `cleanupError` attached when it is an
 `Error` and cleanup also fails. The Ace command reports the original error, reports an attached
 cleanup failure separately, and exits nonzero. A later `prune` removes unfinished bundles. Errors
-before lock acquisition have no acquired lock to release.
+before lock acquisition have no acquired lock to release. Native close and lock-release failures can accompany the operation failure in `resourceCleanupErrors`. If native cleanup fails after publication, create attempts to unpublish and remove its own bundle before propagating the failure.
 
 Implementation: [createBundle](../src/bundles.ts), [acquireLock](../src/lock.ts) and
 [DbBackup.run](../commands/db_backup.ts).

@@ -11,7 +11,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 
 ## Acceptance criteria
 
-- `DbBackup.run` prepares the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
+- `DbBackup.run` checks the source/root layout before preparing the configured root and calls `SqliteBackup.create()`, which resolves the configured live path, selected migration table, lock timeout and WAL requirement.
 - `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
 - The copy is made using SQLite backup, journal and migration metadata are checked, `readDatabaseIntegrityProblem()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
 - Verification uses package-opened SQLite connections. SQL functions, collations or extensions registered only on the application's connection are not registered on those handles. A schema that depends on them, such as an expression index using an application-registered function, may fail verification; create fails closed and does not publish the bundle. There is no connection initializer hook.
@@ -19,14 +19,19 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
 - `create` uses only configured backup directory; `--directory` is invalid for this action.
 
+- Create compares every ordered row of the source migration journal with the copy. A missing journal omits migration metadata. Unsupported metadata prevents publication. [Adoption scenarios](../../tests/adoption.spec.ts)
+
 ## User flow
 
 ```mermaid
 flowchart TD
-    A["Operator runs db:backup create"] --> B["Prepare configured private backup root"]
+    A["Operator runs db:backup create"] --> P["Check source/root layout"]
+    P --> B["Prepare configured private backup root"]
     B --> C["Acquire lock and open configured live SQLite source"]
     C -->|Lock busy past lockTimeoutMs| X["Refuse E_BACKUP_LOCKED; retry later"]
-    C --> J{"Existing source mode is WAL?"}
+    C --> O{"Source readable and idle?"}
+    O -->|No| F
+    O -->|Yes| J{"Existing source mode is WAL?"}
     J -->|No and requireWal| K["Refuse; operator resolves source configuration"]
     J -->|No and allowed| L["Continue without changing source journal mode"]
     L --> Y{"Newest bundle dated over 24 h ahead of clock?"}
@@ -35,42 +40,54 @@ flowchart TD
     Y -->|No| D["Copy, normalize copy to DELETE, verify and write manifest"]
     D --> E{"All checks pass?"}
     E -->|No| F["Report failure; unfinished bundle is not published"]
-    E -->|Yes| G["Write READY last; report queued non-WAL warning if any and bundle path"]
+    E -->|Yes| G["Write READY last and finish resource cleanup"]
+    G -->|Cleanup succeeds| H["Report warnings and bundle path"]
+    G -->|Cleanup fails| F
 ```
 
 ## Code flow
 
-Scope: Ace create action through publication, failure cleanup and lock release. `assertDirectory`, `assertSafeLayout` and `acquireLock` failures happen before the lock-owning `try/finally`, so a lock that was never acquired is not released.
+Scope: Ace create action through publication, failure cleanup and lock release. `assertDirectory`, `assertSafeLayout` and `acquireCreateLock` failures happen before the lock-owning `try/finally`, so a lock that was never acquired is not released.
 
 ```mermaid
 flowchart TD
-    A["DbBackup.run create case"] --> B["SqliteBackup.prepareDirectory"]
+    A["DbBackup.run create case"] --> A1["assertSafeLayout before preparing the root"]
+    A1 --> B["SqliteBackup.prepareDirectory"]
     B --> C["SqliteBackup.create"]
     C --> D["resolveSqliteSource and createBundle"]
-    D --> E["assertDirectory, assertSafeLayout, acquireLock"]
+    D --> E["assertDirectory, assertSafeLayout, await acquireCreateLock"]
     E -->|Lock busy past lockTimeoutMs| W["Throw E_BACKUP_LOCKED"]
     E -->|Lock acquired| O["Open source and read journal_mode"]
-    O --> J{"Non-WAL?"}
+    O --> O1{"Source readable and not in transaction?"}
+    O1 -->|No| K
+    O1 -->|Yes| J{"Non-WAL?"}
     J -->|"Non-WAL and requireWal"| K["Throw E_BACKUP_SOURCE"]
     J -->|"Non-WAL and allowed"| L["Add warning without changing source"]
     J -->|"No, source is WAL"| Q{"Newest bundle over MAX_FUTURE_MS ahead of clock?"}
     L --> Q
     Q -->|Yes| R["Throw E_BACKUP_UNSAFE"]
     Q -->|No| S["mkdir bundle directory; this call now owns it"]
-    S --> N["Read source migration rows"]
+    S --> N["Sync archive and read source migration rows"]
     N --> F["NativeDatabase.backup to db.sqlite"]
     F --> M["Checkpoint copy; set copy journal_mode DELETE"]
-    M --> G["Verify copied migration rows; readDatabaseIntegrityProblem and hashFileSha256"]
-    G --> H["writeDurable manifest then READY"]
-    H --> I["Return result"]
-    K --> V["Catch: rmSync bundle only if this call created it"]
+    M --> G["Remove copy sidecars; verify copied migration rows and readDatabaseIntegrityProblem"]
+    G --> H["chmod 0400 and sync; hash file, validate metadata, write manifest then READY and sync"]
+    H --> I["Record result"]
+    K --> V["Catch: remove READY then owned bundle if created"]
     R --> V
+    S -->|failure| V
+    N -->|failure| V
     F -->|failure| V
+    M -->|failure| V
     G -->|failure| V
     H -->|failure| V
-    V --> U["Rethrow original; attach cleanupError if rmSync fails"]
-    I --> T["Finally: close owned source; lock.release()"]
+    V --> U["Record primary error and any cleanupError"]
+    I --> T["Finally: attempt owned source close and lock.release independently"]
     U --> T
+    T --> T1{"Primary or resource cleanup failure?"}
+    T1 -->|Primary failure| T2["Throw primary error with resource cleanup diagnostics"]
+    T1 -->|Cleanup only| T3["Attempt unpublication and owned bundle removal; throw cleanup failure"]
+    T1 -->|Neither| T4["Return result"]
 ```
 
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts), [durability tests](../../tests/durability.spec.ts).

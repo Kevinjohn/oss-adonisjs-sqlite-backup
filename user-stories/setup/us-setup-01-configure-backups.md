@@ -25,6 +25,8 @@ As an application operator, I want to configure the Lucid connection, private ba
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
 - A caller using exported `acquireLock(directory, timeoutMs)` directly must provide an existing private directory on a local filesystem, with ancestors writable only by trusted users or sticky as described in the README limits. `acquireLock` itself does not check root privacy. Keep the returned lock referenced through `release()`. `.backup.lock` contains no application data. Damaged-lock repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
+- If the app resolves the singleton without a backup config, the provider raises `E_BACKUP_SOURCE` with the configure command. Missing config differs from a present config with an empty directory, for which archive overrides are available. [Provider](../../providers/sqlite_backup_provider.ts), [application tests](../../tests/app.spec.ts)
+
 ## User flow
 
 ```mermaid
@@ -43,13 +45,19 @@ Scope: operator setup and backup-root behavior in service and command entry poin
 
 ```mermaid
 flowchart TD
-    A["configure(command) writes config and registers provider and command loader"] --> B["Provider binds SqliteBackup"]
-    B --> C{"Which operation starts?"}
+    A["configure(command) writes config and registers provider and command loader"] --> B["Provider registers lazy singleton"]
+    B --> B1{"Backup config present and valid?"}
+    B1 -->|No| X["Throw missing config or validation error when resolved"]
+    B1 -->|Yes| C{"Which operation starts?"}
+    C -->|checkSource| S["Resolve enabled source; open read-only, probe schema and close"]
+    C -->|prepareDirectory| P["Create or tighten root to 0700"]
+    C -->|Recovery action| R["Use supplied directory or configured root; restore also resolves live path"]
     C -->|Service create or prune| D["Use configured root without preparing it"]
     D --> E{"Does the root already exist?"}
     E -->|No| F["Fail; direct service call does not recreate the root"]
     E -->|Yes| G["Create bundle or prune retained bundles"]
-    C -->|db:backup create| H["Command calls prepareDirectory"]
+    C -->|db:backup create| H1["Check source/root layout"]
+    H1 --> H["Command calls prepareDirectory"]
     H --> I["Command calls backup.create"]
     I --> J["Create bundle in prepared root"]
 ```
