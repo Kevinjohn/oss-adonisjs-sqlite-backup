@@ -109,6 +109,12 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
     throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} has no READY marker`)
   }
   try {
+    if (
+      !lstatSync(join(bundle.path, READY)).isFile() ||
+      !lstatSync(join(bundle.path, MANIFEST)).isFile()
+    ) {
+      throw new Error('expected regular READY and manifest files')
+    }
     const manifest = JSON.parse(readFileSync(join(bundle.path, MANIFEST), 'utf8')) as BundleManifest
     if (
       manifest.format !== 1 ||
@@ -131,7 +137,9 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
 export function assertMatchesManifest(path: string, manifest: BundleManifest, label: string): void {
   let matches: boolean
   try {
-    matches = statSync(path).size === manifest.bytes && hashFileSha256(path) === manifest.sha256
+    const stat = lstatSync(path)
+    if (!stat.isFile()) throw new Error('expected a regular database file')
+    matches = stat.size === manifest.bytes && hashFileSha256(path) === manifest.sha256
   } catch (cause) {
     throw new BackupException('E_BACKUP_INVALID', `${label}: database file cannot be read`, {
       cause,
@@ -276,7 +284,7 @@ export async function createBundle(
     const migrations = readMigrationRows(source, migrationsTable)
     internalHooks.step?.('create:copying', file)
     // One step: the default 100-page steps restart on every write by another connection and
-    // never finish under sustained writes. One step copies under a single read snapshot.
+    // never finish under sustained writes. One step copies under a single SQLite read snapshot.
     await source.backup(file, { progress: () => 0x7fffffff })
     internalHooks.step?.('create:copied', file)
     const copy = openDatabase(file, { fileMustExist: true })

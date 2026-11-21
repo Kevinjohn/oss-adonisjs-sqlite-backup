@@ -27,6 +27,7 @@
     ".": "./build/index.js",
     "./types": "./build/src/types.js",
     "./commands": "./build/commands/main.js",
+    "./services/main": "./build/services/main.js",
     "./sqlite_backup_provider": "./build/providers/sqlite_backup_provider.js"
   },
   "scripts": {
@@ -117,10 +118,12 @@
       "./commands/main.ts",
       "./commands/db_backup.ts",
       "./commands/db_upgrade.ts",
+      "./services/main.ts",
       "./stubs/main.ts",
       "./providers/sqlite_backup_provider.ts"
     ],
     "outDir": "./build",
+    "unbundle": true,
     "clean": true,
     "format": "esm",
     "minify": "dce-only",

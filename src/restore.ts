@@ -69,6 +69,13 @@ export function prepareRestore(input: {
   const source = join(bundle.path, DATABASE)
   internalHooks.step?.('restore:checked', target)
   try {
+    const sourceStat = lstatSync(source, { throwIfNoEntry: false })
+    if (sourceStat && !sourceStat.isFile()) {
+      throw new BackupException(
+        'E_BACKUP_INVALID',
+        `bundle ${bundle.name} database is not a regular file`
+      )
+    }
     copyFileSync(source, target, constants.COPYFILE_EXCL)
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code

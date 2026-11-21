@@ -279,6 +279,17 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
 })
 
 test.group('provider', () => {
+  test('service import resolves the configured container singleton', async ({ assert }) => {
+    const { root, cleanup } = createTemporaryRoot()
+    const { app } = await bootApp(root)
+    try {
+      const { default: backup } = await import('../services/main.js')
+      assert.strictEqual(backup, await app.container.make('sqlite.backup'))
+    } finally {
+      await app.terminate()
+      cleanup()
+    }
+  })
   test('without config/backup.ts the binding fails with a fix-it message', async ({ assert }) => {
     const { root, cleanup } = createTemporaryRoot()
     const { app } = await bootApp(root, { withBackupConfig: false })

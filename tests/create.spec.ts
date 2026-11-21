@@ -162,12 +162,13 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     const db = makeLiveDatabase(live)
     db.pragma('foreign_keys = OFF')
-    db.prepare('INSERT INTO items(body, parent_id) VALUES (?, 999)').run('orphan')
+    const insert = db.prepare('INSERT INTO items(body, parent_id) VALUES (?, 999)')
+    for (let index = 0; index < 2_000; index++) insert.run('orphan')
     db.close()
     const directory = join(root, 'b')
     await assert.rejects(
       () => createBundle(prepared({ livePath: live, directory })),
-      /foreign_key_check/
+      /foreign_key_check: 2000 violation\(s\)/
     )
     assert.deepEqual(
       readdirSync(directory).filter((n) => n.startsWith('bak-')),

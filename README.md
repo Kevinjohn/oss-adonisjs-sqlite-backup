@@ -15,10 +15,16 @@ pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/downlo
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 
-`configure` writes `config/backup.ts` and adds the provider and the `db:backup` command to
-`adonisrc.ts`. The live database path comes from the Lucid connection in `config/database.ts`.
+The Ace `configure` command requires `@adonisjs/assembler` in the host application for its
+codemods. It writes `config/backup.ts` and adds the provider and the package's Ace command loader
+(`db:backup` and `db:upgrade`) to `adonisrc.ts`. The loader uses Ace's `ListLoader` directly for
+command discovery and metadata. A plain rerun preserves an existing config and does not duplicate
+registrations. Also register `@adonisjs/lucid/commands` to use `db:upgrade`.
+The live database path comes from the Lucid connection in `config/database.ts`.
 
 ## Commands
+
+Select an operation of the `db:backup` Ace command using its positional `action` argument.
 
 | Command                                                            | What it does                                                                                     | Lock |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---- |
@@ -42,7 +48,7 @@ the bundle is fixed. `manifest.createdAt` is the real clock time.
 
 `list`, `verify` and `restore-prepare` accept `--directory <path>` to read another backup
 root. This overrides the configured directory and works even when scheduled backups are disabled.
-`create` and `prune` always use the configured directory. A flag given with an action that does
+`create` and `prune` always use the configured directory. A flag given with an operation that does
 not read it, such as `prune --bundle`, is refused.
 
 ## Service and configuration
@@ -64,6 +70,22 @@ If prune fails while syncing the archive or releasing its lock, the command exit
 reports the removals it observed and any per-bundle errors. A failed archive sync leaves removal
 durability unconfirmed. Programmatic callers can read the same details from the error's
 `pruneProgress` property.
+
+From the next release (or a package built from this checkout), a booted application can import
+the same singleton as the `sqlite.backup` container binding at the new service entry point:
+
+```ts
+import backup from '@kevinjohn/adonisjs-sqlite-backup/services/main'
+
+backup.checkSource()
+backup.prepareDirectory()
+```
+
+Do not run those calls before the application has booted. The root entry point and standalone
+utilities do not require a booted AdonisJS application. `defineConfig` checks that a supplied
+`connection` is a non-blank string, `directory` is a string (empty disables configured operations),
+and `requireWal` is boolean. Incorrect source settings produce `E_BACKUP_SOURCE`; incorrect
+directory settings produce `E_BACKUP_UNSAFE`.
 
 Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
@@ -89,7 +111,8 @@ filename spelling; this does not promise support for every kernel filename form.
 better-sqlite3 handles remain supported and are not closed by the package.
 
 When the source has a migration journal, the complete rows captured immediately before copying
-must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
+must match the copy. The backup reads SQLite through a single SQLite read snapshot.
+`createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
 manifest field `migrations: { table, count, last }` records the journal's row count and last name.
 Verify and restore preparation check that metadata against the copy. Databases without the table
@@ -105,21 +128,26 @@ connection-local SQL features on its verification connections.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
 with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
+Listing checks the creation metadata without reading or hashing the database; verify and restore
+preparation check the expected size and hash against the bytes. The READY marker, manifest and
+database members must be regular files for recovery. A missing `sourceJournalMode` in an imported
+format-1 manifest is tolerated for compatibility; it is not used to establish recovery integrity.
 
 ## Upgrading a database
 
-`node ace db:upgrade` takes a verified snapshot of the primary connection's database, then runs
+The `db:upgrade` Ace command (`node ace db:upgrade`) creates a verified pre-migration backup bundle
+of the primary connection's database, then runs
 `migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.
 
-- The snapshot goes to `pre-migration` under the configured backup directory, or to
+- The pre-migration backup bundle goes to `pre-migration` under the configured backup directory, or to
   `<database>.backups` beside the database when no backup directory is configured. These bundles
   are outside `db:backup prune`. `preMigrationBackupDirectory(dbPath, configuredDirectory)` returns
   the same path.
-- The snapshot records the primary connection's migrations table and follows the backup config's
+- The bundle records the primary connection's migrations table and follows the backup config's
   `lockTimeoutMs` and `requireWal`, like `db:backup create`.
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
-  without a snapshot. Views or SQLite header metadata alone do not meet the table condition.
-- If the snapshot cannot be written, nothing is migrated and the command exits 1 with
+  without a pre-migration backup bundle. Views or SQLite header metadata alone do not meet the table condition.
+- If the bundle cannot be written, nothing is migrated and the command exits 1 with
   `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
 - The primary connection must use `better-sqlite3`.
 - Schema classes are generated with `schema:generate` only after every migration succeeds, and not
@@ -138,6 +166,10 @@ if (upgrade.exitCode !== 0) {
 ## Stopped-server operator commands
 
 Three exports support commands that must own the database while the server is stopped:
+
+The operator must actually stop the server before running these commands. Confirmation is an
+operator precondition, not an automatic server-status probe; the exclusive-lock acquisition checks
+database contention separately.
 
 - `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
   example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a

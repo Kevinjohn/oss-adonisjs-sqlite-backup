@@ -48,6 +48,37 @@ test.group('verify and prepareRestore', (group) => {
     assert.equal(verifyBundle(directory, name).name, name)
   })
 
+  test('format-1 imports without journal-mode metadata still verify', ({ assert }) => {
+    const manifest = join(path, 'manifest.json')
+    const contents = JSON.parse(readFileSync(manifest, 'utf8'))
+    delete contents.sourceJournalMode
+    chmodSync(manifest, 0o600)
+    writeFileSync(manifest, JSON.stringify(contents))
+    assert.equal(verifyBundle(directory, name).name, name)
+  })
+
+  test('published members must be regular files', ({ assert }) => {
+    for (const member of ['READY', 'manifest.json', 'db.sqlite']) {
+      const file = join(path, member)
+      const bytes = readFileSync(file)
+      unlinkSync(file)
+      mkdirSync(file)
+      assert.equal(
+        readBackupErrorCode(() => verifyBundle(directory, name)),
+        'E_BACKUP_INVALID'
+      )
+      const target = join(root, 'staged.db')
+      assert.equal(
+        readBackupErrorCode(() => prepareRestore({ directory, livePath: live, target })),
+        'E_BACKUP_INVALID'
+      )
+      assert.isFalse(existsSync(target))
+      rmSync(file, { recursive: true })
+      writeFileSync(file, bytes)
+    }
+    assert.equal(verifyBundle(directory, name).name, name)
+  })
+
   test('verify rejects a corrupt bundle, a missing READY and a bad manifest', async ({
     assert,
   }) => {
