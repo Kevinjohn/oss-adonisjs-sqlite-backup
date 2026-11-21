@@ -28,6 +28,29 @@ test.group('config and source resolution', () => {
     assert.equal(defineConfig({}).directory, '')
   })
 
+  test('invalid runtime types fail with configuration diagnostics', ({ assert }) => {
+    for (const [input, field, code] of [
+      [{ connection: '' }, 'connection', 'E_BACKUP_SOURCE'],
+      [{ connection: '   ' }, 'connection', 'E_BACKUP_SOURCE'],
+      [{ connection: 123 }, 'connection', 'E_BACKUP_SOURCE'],
+      [{ directory: false }, 'directory', 'E_BACKUP_UNSAFE'],
+      [{ requireWal: 'false' }, 'requireWal', 'E_BACKUP_SOURCE'],
+    ] as const) {
+      try {
+        defineConfig(input as Parameters<typeof defineConfig>[0])
+        assert.fail('accepted malformed config')
+      } catch (error) {
+        assert.instanceOf(error, BackupException)
+        assert.equal((error as BackupException).code, code)
+        assert.include((error as Error).message, field)
+      }
+    }
+    assert.equal(
+      defineConfig({ connection: 'custom connection', requireWal: true }).connection,
+      'custom connection'
+    )
+  })
+
   test('the live path comes from the Lucid connection config', ({ assert }) => {
     assert.equal(resolveSqliteSource(sqlite('/data/app.db')), '/data/app.db')
     assert.equal(resolveSqliteSource(sqlite('rel.db')), join(process.cwd(), 'rel.db'))

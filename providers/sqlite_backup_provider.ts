@@ -1,5 +1,6 @@
 import type { ApplicationService } from '@adonisjs/core/types'
 import { BackupException } from '../src/errors.js'
+import { defineConfig } from '../src/define_config.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
 import type { BackupConfig, LucidDatabaseConfig } from '../src/types.js'
 
@@ -22,7 +23,10 @@ export default class SqliteBackupProvider {
           'config/backup.ts is missing: run "node ace configure @kevinjohn/adonisjs-sqlite-backup"'
         )
       }
-      return new SqliteBackup(config, this.app.config.get<LucidDatabaseConfig>('database'))
+      return new SqliteBackup(
+        defineConfig(config),
+        this.app.config.get<LucidDatabaseConfig>('database')
+      )
     })
   }
 }

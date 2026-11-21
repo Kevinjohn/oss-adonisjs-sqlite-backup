@@ -45,8 +45,11 @@ test('configure writes config/backup.ts and registers provider and commands once
     assert.include(config, "from '@kevinjohn/adonisjs-sqlite-backup'")
     assert.include(config, "directory: app.makePath('storage/backups')")
 
+    const edited = config.replace('keep: 7', 'keep: 12')
+    await writeFile(join(root, 'config/backup.ts'), edited)
     await ignitor.ace().handle(['configure', '@kevinjohn/adonisjs-sqlite-backup'])
     assert.equal(await readFile(join(root, 'adonisrc.ts'), 'utf8'), rc)
+    assert.equal(await readFile(join(root, 'config/backup.ts'), 'utf8'), edited)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

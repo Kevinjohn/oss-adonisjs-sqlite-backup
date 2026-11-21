@@ -7,7 +7,7 @@ import { assertSafeLayout, normalizeConfiguredSqliteFilename } from '../src/sour
 import type { BackupConfig } from '../src/types.js'
 import { preMigrationBackupDirectory } from '../src/upgrade.js'
 
-/** `node ace db:upgrade`: a verified snapshot of an existing database, then `migration:run`. */
+/** `node ace db:upgrade`: a verified pre-migration backup bundle, then `migration:run`. */
 export default class DbUpgrade extends BaseCommand {
   static commandName = 'db:upgrade'
   static description = 'Back up the SQLite database, then run pending migrations'

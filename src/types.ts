@@ -72,3 +72,7 @@ export interface PruneProgress extends PruneResult {
   /** The final archive sync failed, so removal durability is unconfirmed. */
   archiveSyncFailed: boolean
 }
+
+export type { BackupErrorCode } from './errors.js'
+export type { DirectoryLock } from './lock.js'
+export type { NativeDatabase } from './native.js'

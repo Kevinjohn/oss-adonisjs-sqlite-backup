@@ -36,7 +36,7 @@ Standalone exports are in [the package index](../index.ts). The [README](../READ
 `createBundle()` reads the live source journal mode without changing it. A non-WAL source is
 allowed with a warning unless `requireWal` is enabled, in which case create refuses. Only the
 backup copy is checkpointed and changed to `journal_mode=DELETE`. The copied migration rows must
-match the source snapshot; the copy must pass integrity and foreign-key checks before the
+match the source SQLite read snapshot; the copy must pass integrity and foreign-key checks before the
 read-only database and SHA-256 manifest are written. `READY` is written last, so only a checked,
 published bundle is a recovery point.
 

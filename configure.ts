@@ -2,8 +2,8 @@ import type Configure from '@adonisjs/core/commands/configure'
 import { stubsRoot } from './stubs/main.js'
 
 /**
- * Writes config/backup.ts and registers the provider and the db:backup command. Ace finds a
- * command before any provider boots, so commands are registered in adonisrc, as Lucid does.
+ * Writes config/backup.ts and registers the provider and the loader for the db:backup and
+ * db:upgrade Ace commands. Ace finds commands before any provider boots, as Lucid does.
  */
 export async function configure(command: Configure) {
   const codemods = await command.createCodemods()
