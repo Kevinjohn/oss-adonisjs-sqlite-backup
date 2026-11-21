@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-21
+
+- Document and verify the package user stories and implementation flows.
+
 ## 0.3.3 - 2026-11-21
 
 - `db:upgrade` exits non-zero when a migration fails on every Lucid 22 release. With Lucid 22.0 or
