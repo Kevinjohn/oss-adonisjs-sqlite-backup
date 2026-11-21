@@ -2,6 +2,8 @@ import { BaseCommand, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { createBundle } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
+import { resolveFilesystemPath } from '../src/paths.js'
+import { assertSafeLayout, normalizeConfiguredSqliteFilename } from '../src/source.js'
 import type { BackupConfig } from '../src/types.js'
 import { preMigrationBackupDirectory } from '../src/upgrade.js'
 
@@ -25,7 +27,10 @@ export default class DbUpgrade extends BaseCommand {
       if (connectionConfig?.client !== 'better-sqlite3') {
         throw new Error('db:upgrade requires the configured SQLite connection')
       }
-      const dbPath = (connectionConfig.connection as { filename: string }).filename
+      const dbPath = normalizeConfiguredSqliteFilename(
+        (connectionConfig.connection as { filename: string }).filename,
+        connectionConfig.client
+      )
       const existing = await db
         .from('sqlite_master')
         .where({ type: 'table' })
@@ -33,8 +38,12 @@ export default class DbUpgrade extends BaseCommand {
         .first()
       // An empty or in-memory database has nothing to roll back to.
       if (dbPath !== ':memory:' && existing) {
+        if (!dbPath || /^file:/i.test(dbPath)) {
+          throw new Error('db:upgrade requires a file-backed SQLite connection')
+        }
         const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
         const directory = preMigrationBackupDirectory(dbPath, config?.directory)
+        assertSafeLayout(resolveFilesystemPath(dbPath), resolveFilesystemPath(directory))
         prepareDirectory(directory)
         // The same journal table and guards as db:backup, read from the connection being migrated.
         const bundle = await createBundle({

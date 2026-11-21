@@ -1,20 +1,22 @@
 import { prepared } from './helpers.js'
 /** Every publish step is fsynced in order: file, then its directory, before the next step. */
 import { test } from '@japa/runner'
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createBundle } from '../src/bundles.js'
+import { prepareDirectory } from '../src/directory.js'
 import { writeAll } from '../src/fs.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
-import { makeLiveDatabase, tempRoot } from './helpers.js'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
 test.group('durability', (group) => {
   let root: string
   let cleanup: () => void
   let events: string[]
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     events = []
     internalHooks.durability = (event, path) => {
       events.push(`${event} ${relative(root, path).replace(/bak-utc-[\d-]+/, 'BUNDLE')}`)
@@ -32,6 +34,7 @@ test.group('durability', (group) => {
     makeLiveDatabase(live).close()
     await createBundle(prepared({ livePath: live, directory: join(root, 'b') }))
     assert.deepEqual(events, [
+      'sync ',
       'sync b',
       'sync b/BUNDLE/db.sqlite',
       'write b/BUNDLE/manifest.json',
@@ -40,6 +43,69 @@ test.group('durability', (group) => {
       'sync b/BUNDLE',
       'sync b',
     ])
+  })
+
+  test('first-use nested root syncs every new parent entry before bundle publication', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'nested', 'backups')
+    prepareDirectory(directory)
+    await createBundle({ livePath: live, directory })
+    assert.deepEqual(events.slice(0, 2), ['sync ', 'sync nested'])
+    assert.equal(events[2], 'sync nested/backups')
+    assert.equal(events.at(-1), 'sync nested/backups')
+  })
+
+  test('two staged preparations accept a directory created after their missing-entry scan', ({
+    assert,
+  }) => {
+    const directory = join(root, 'nested', 'backups')
+    let secondStarted = false
+    internalHooks.durability = (event, path) => {
+      events.push(`${event} ${relative(root, path)}`)
+      if (event === 'sync' && path === root && !secondStarted) {
+        secondStarted = true
+        prepareDirectory(directory)
+      }
+    }
+    prepareDirectory(directory)
+    assert.isTrue(secondStarted)
+    assert.deepEqual(events, ['sync ', 'sync nested', 'sync nested'])
+  })
+
+  test('preparing an existing file refuses it without changing its mode or bytes', ({ assert }) => {
+    const file = join(root, 'backup-root')
+    const bytes = Buffer.from('keep this file intact')
+    writeFileSync(file, bytes, { mode: 0o644 })
+    const beforeMode = statSync(file).mode & 0o777
+
+    assert.throws(() => prepareDirectory(file), /must be a private directory/)
+    assert.equal(statSync(file).mode & 0o777, beforeMode)
+    assert.deepEqual(readFileSync(file), bytes)
+  })
+
+  test('preparing a missing root written with a trailing slash creates it', ({ assert }) => {
+    const directory = join(root, 'nested', 'backups')
+    prepareDirectory(`${directory}/`)
+    assert.equal(statSync(directory).mode & 0o777, 0o700)
+
+    const file = join(root, 'backup-root')
+    writeFileSync(file, '')
+    assert.throws(() => prepareDirectory(`${file}/`), /non-directory/)
+  })
+
+  test('preparing existing permissive directories tightens their mode', ({ assert }) => {
+    for (const mode of [0o755, 0o777]) {
+      const directory = join(root, `mode-${mode.toString(8)}`)
+      mkdirSync(directory, { mode })
+      chmodSync(directory, mode)
+
+      prepareDirectory(directory)
+
+      assert.equal(statSync(directory).mode & 0o777, 0o700)
+    }
   })
 
   test('restore-prepare fsyncs the staged file and its directory', async ({ assert }) => {

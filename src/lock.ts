@@ -1,8 +1,10 @@
 import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } from 'node:fs'
 import { join } from 'node:path'
+import { performance } from 'node:perf_hooks'
+import { setTimeout as delay } from 'node:timers/promises'
 import { BackupException } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
-import { realPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.js'
 import { LOCK_FILE } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 
@@ -11,8 +13,19 @@ export interface DirectoryLock {
 }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
+const localLockHandlesByPath = new Map<string, WeakRef<NativeDatabase>>()
+export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
 
-function tryLock(path: string, timeoutMs: number): NativeDatabase {
+export function assertLockTimeout(timeoutMs: number): void {
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
+    throw new BackupException(
+      'E_BACKUP_UNSAFE',
+      `backup lockTimeoutMs must be an integer between 0 and ${MAX_LOCK_TIMEOUT_MS}`
+    )
+  }
+}
+
+function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
   try {
     handle = openDatabase(path, { timeout: timeoutMs })
@@ -23,7 +36,15 @@ function tryLock(path: string, timeoutMs: number): NativeDatabase {
     handle.exec('BEGIN EXCLUSIVE')
     return handle
   } catch (error) {
-    handle.close()
+    try {
+      handle.close()
+    } catch (closeError) {
+      if (error instanceof Error) {
+        Object.defineProperty(error, 'resourceCleanupErrors', { value: [closeError] })
+      } else {
+        throw new AggregateError([error, closeError], 'lock acquisition and close failed')
+      }
+    }
     throw error
   }
 }
@@ -39,9 +60,12 @@ function truncateLockFile(path: string): void {
     })
   }
   try {
-    /* c8 ignore next 3 -- a device node swapped in by someone able to create one */
-    if (!fstatSync(fd).isFile()) {
-      throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`)
+    const stat = fstatSync(fd)
+    if (!stat.isFile() || stat.nlink !== 1) {
+      throw new BackupException(
+        'E_BACKUP_UNSAFE',
+        `lock path ${path} must be a singly linked regular file`
+      )
     }
     ftruncateSync(fd, 0)
   } finally {
@@ -60,15 +84,19 @@ function truncateLockFile(path: string): void {
  * file another process has just locked changes nothing.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
-  const path = join(realPath(directory), LOCK_FILE)
+  assertLockTimeout(timeoutMs)
+  const path = join(resolveFilesystemPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
     throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`)
   }
   let handle: NativeDatabase
   try {
-    handle = tryLock(path, timeoutMs)
+    // A holder on this event loop cannot make progress while SQLite waits synchronously.
+    const wait = localLockHandlesByPath.get(path)?.deref()?.inTransaction ? 0 : timeoutMs
+    handle = acquireNativeLock(path, wait)
   } catch (error) {
+    if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
     const code = (error as { code?: string }).code
     if (code === 'SQLITE_BUSY') {
       throw new BackupException('E_BACKUP_LOCKED', `backup directory ${directory} is locked`, {
@@ -80,13 +108,55 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     truncateLockFile(path)
     return acquireLock(directory, timeoutMs)
   }
+  const reference = new WeakRef(handle)
+  localLockHandlesByPath.set(path, reference)
   let released = false
   return {
     release() {
       if (released) return
-      released = true
-      handle.exec('ROLLBACK')
-      handle.close()
+      let rollbackError: unknown
+      let rollbackFailed = false
+      try {
+        handle.exec('ROLLBACK')
+      } catch (error) {
+        rollbackError = error
+        rollbackFailed = true
+      }
+      let closeError: unknown
+      let closeFailed = false
+      try {
+        handle.close()
+        released = true
+        if (localLockHandlesByPath.get(path) === reference) localLockHandlesByPath.delete(path)
+      } catch (error) {
+        closeError = error
+        closeFailed = true
+      }
+      if (rollbackFailed && closeFailed) {
+        if (rollbackError instanceof Error) {
+          Object.defineProperty(rollbackError, 'resourceCleanupErrors', { value: [closeError] })
+          throw rollbackError
+        }
+        throw new AggregateError([rollbackError, closeError], 'lock release failed')
+      }
+      if (rollbackFailed) throw rollbackError
+      if (closeFailed) throw closeError
     },
+  }
+}
+
+/** Wait for a create lock without blocking the event loop needed by an in-process backup. */
+export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
+  assertLockTimeout(timeoutMs)
+  const deadline = performance.now() + timeoutMs
+  while (true) {
+    try {
+      return acquireLock(directory)
+    } catch (error) {
+      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_LOCKED') throw error
+      const remaining = deadline - performance.now()
+      if (remaining <= 0) throw error
+      await delay(Math.min(remaining, 10))
+    }
   }
 }

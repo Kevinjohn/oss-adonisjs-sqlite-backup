@@ -16,13 +16,14 @@ As an application operator, I want to configure the Lucid connection, private ba
 | `directory`     | `config/backup.ts` string | May be omitted/empty to disable configured operations; backup root must not contain the live database; a sibling backup folder is valid |
 | `connection`    | Lucid connection name     | Optional; defaults to Lucid's configured connection; uses its source and migration table when available                                 |
 | `keep`          | Integer                   | Defaults to 7; minimum 1                                                                                                                |
-| `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; minimum 0                                                                                                                |
+| `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; range 0–2,147,483,647                                                                                                    |
 | `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                                                                 |
 
 - Ace configure writes config stub and registers the provider and the package command loader (`@kevinjohn/adonisjs-sqlite-backup/commands`), which provides `db:backup` and `db:upgrade`. Provider binds `sqlite.backup` from backup and Lucid config.
 - `defineConfig` validates `keep` and `lockTimeoutMs`; absent directory disables configured service operations, while a read-only `--directory` override remains available to list/verify/restore-prepare.
 - At host startup, `checkSource()` can fail fast without making a bundle; call `prepareDirectory()` once to create/tighten the root to `0700` before scheduling create then prune.
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
+- A caller using exported `acquireLock(directory, timeoutMs)` directly must provide an existing private directory on a local filesystem, with ancestors writable only by trusted users or sticky as described in the README limits. `acquireLock` itself does not check root privacy. Keep the returned lock referenced through `release()`. `.backup.lock` contains no application data. Damaged-lock repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
 ## User flow
 
@@ -53,4 +54,4 @@ flowchart TD
     I --> J["Create bundle in prepared root"]
 ```
 
-**Code references:** [configure hook](../../configure.ts), [provider](../../providers/sqlite_backup_provider.ts), [config validation](../../src/define_config.ts), [service create and prune](../../src/sqlite_backup.ts), [prune root check](../../src/prune.ts), [db:backup create preparation](../../commands/db_backup.ts), [README startup contract](../../README.md#service-and-configuration).
+**Code references:** [configure hook](../../configure.ts), [provider](../../providers/sqlite_backup_provider.ts), [config validation](../../src/define_config.ts), [service create and prune](../../src/sqlite_backup.ts), [prune root check](../../src/prune.ts), [direct lock export](../../index.ts), [lock implementation](../../src/lock.ts), [db:backup create preparation](../../commands/db_backup.ts), [README startup contract](../../README.md#service-and-configuration).

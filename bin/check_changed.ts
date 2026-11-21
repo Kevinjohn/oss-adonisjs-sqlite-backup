@@ -11,6 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url))
 const stepLimitMs = 15 * 60 * 1000
 const termGraceMs = 5000
 const reapGraceMs = 5000
+const maxOutputChars = 64 * 1024
 let active: ChildProcess | undefined
 let interruptedBy: NodeJS.Signals | undefined
 let interruptionCleanup: Promise<void> | undefined
@@ -133,20 +134,20 @@ function misuse(message: string): never {
   process.exit(2)
 }
 
-function git(args: string[]): string {
+function runGit(args: string[]): string {
   const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
   if (result.status !== 0) misuse(`git ${args.join(' ')} failed: ${result.stderr.trim()}`)
   return result.stdout
 }
 
-function changedFiles(base: string): ChangedFile[] {
-  const mergeBase = git(['merge-base', base, 'HEAD']).trim()
-  const tracked = git(['diff', '--name-status', '--no-renames', '-z', mergeBase]).split('\0')
+function listChangedFiles(base: string): ChangedFile[] {
+  const mergeBase = runGit(['merge-base', base, 'HEAD']).trim()
+  const tracked = runGit(['diff', '--name-status', '--no-renames', '-z', mergeBase]).split('\0')
   const changes: ChangedFile[] = []
   for (let index = 0; index + 1 < tracked.length; index += 2) {
     changes.push({ path: tracked[index + 1], deleted: tracked[index] === 'D' })
   }
-  for (const path of git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')) {
+  for (const path of runGit(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')) {
     if (path) changes.push({ path, deleted: false })
   }
   return changes
@@ -166,21 +167,26 @@ function run(
     let output = ''
     let spawnError: Error | undefined
     let timedOut = false
-    child.stdout.on('data', (chunk) => (output += chunk))
-    child.stderr.on('data', (chunk) => (output += chunk))
+    const appendOutput = (chunk: string) => {
+      output = (output + chunk).slice(-maxOutputChars)
+    }
+    child.stdout.on('data', appendOutput)
+    child.stderr.on('data', appendOutput)
+    let settled = false
+    let timeoutCleanup: Promise<void> | undefined
     const timer = setTimeout(() => {
+      if (settled || active !== child) return
       timedOut = true
-      output += `\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`
-      try {
-        signalOwnedProcess(child, 'SIGKILL')
-      } catch (error) {
-        output += `[check:changed] timeout cleanup failed: ${describeError(error)}\n`
-      }
+      appendOutput(`\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`)
+      timeoutCleanup = terminateOwnedProcess(child)
+      void timeoutCleanup.then(
+        () => abandonActive?.(undefined),
+        (error) => abandonActive?.(error)
+      )
     }, stepLimitMs)
     child.once('error', (error) => {
       spawnError = error
     })
-    let settled = false
     abandonActive = (error) => {
       child.stdout.destroy()
       child.stderr.destroy()
@@ -196,6 +202,13 @@ function run(
       settled = true
       clearTimeout(timer)
       let cleanupError: unknown = terminalError
+      if (timeoutCleanup) {
+        try {
+          await timeoutCleanup
+        } catch (error) {
+          cleanupError = error
+        }
+      }
       if (interruptedBy && interruptionCleanup) {
         try {
           await interruptionCleanup
@@ -205,9 +218,10 @@ function run(
       }
       if (active === child) active = undefined
       abandonActive = undefined
-      if (spawnError) output += `\n[check:changed] spawn failed: ${spawnError.message}\n`
+      if (timedOut) appendOutput(`\n[check:changed] stopped after ${stepLimitMs / 60000} minutes\n`)
+      if (spawnError) appendOutput(`\n[check:changed] spawn failed: ${spawnError.message}\n`)
       if (cleanupError !== undefined) {
-        output += `\n[check:changed] cleanup failed: ${describeError(cleanupError)}\n`
+        appendOutput(`\n[check:changed] cleanup failed: ${describeError(cleanupError)}\n`)
       }
       resolve({ status: timedOut || signal ? null : status, output, cleanupError })
     }
@@ -228,7 +242,7 @@ if (
 )
   misuse(`Unknown base ref ${base}`)
 
-const changes = changedFiles(base)
+const changes = listChangedFiles(base)
 console.log(`[check:changed] ${changes.length} changed files since the merge-base with ${base}`)
 let failed = false
 for (const step of planChangedChecks(changes, { static: flags.includes('--static') })) {
@@ -237,7 +251,7 @@ for (const step of planChangedChecks(changes, { static: flags.includes('--static
     console.log(`skip ${step.label} (${step.skip})`)
     continue
   }
-  const before = step.requiresCleanTree ? git(['status', '--porcelain']) : ''
+  const before = step.requiresCleanTree ? runGit(['status', '--porcelain']) : ''
   const { status, output } = await run(step)
   const tests = step.countsTests ? executedTests(output) : undefined
   const problem =
@@ -247,7 +261,7 @@ for (const step of planChangedChecks(changes, { static: flags.includes('--static
         ? `interrupted by ${interruptedBy}`
         : step.requiresTests && tests === 0
           ? 'no tests executed'
-          : step.requiresCleanTree && git(['status', '--porcelain']) !== before
+          : step.requiresCleanTree && runGit(['status', '--porcelain']) !== before
             ? 'left the worktree dirty'
             : undefined
   if (problem) {

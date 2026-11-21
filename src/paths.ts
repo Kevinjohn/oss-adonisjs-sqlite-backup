@@ -5,46 +5,61 @@ import { BackupException } from './errors.js'
 /** Symlink hops followed before giving up, as Linux does (MAXSYMLINKS). */
 const MAX_LINKS = 40
 
-const segments = (path: string) => path.split('/').filter((s) => s !== '' && s !== '.')
+/** Stands for a trailing slash. It cannot be a folder name, since paths are split on it. */
+const TRAILING_SLASH = '/'
+
+const splitPathSegments = (path: string) => {
+  const parts = path.split('/').filter((s) => s !== '')
+  if (path.endsWith('/')) parts.push(TRAILING_SLASH)
+  return parts
+}
 
 /**
  * The real path the kernel (and SQLite) reaches for `path`, relative paths taken from the current
  * folder. It walks one segment at a time: a symlink's text is spliced into the remaining segments
- * and `..` steps up from the real folder reached so far, never from the text. When the file exists
- * the result equals `fs.realpathSync.native` (libc). Node's JS `fs.realpathSync` is not a reference:
- * it collapses `..` as text first. At the first missing segment the rest is appended as is; a
- * `..` after that is refused, since the kernel would fail with ENOENT.
+ * and `..` steps up from the real folder reached so far, never from the text. Existing paths
+ * match `fs.realpathSync.native` when no segment traverses a regular file. A regular file followed
+ * by another segment, including a trailing slash or `.`, is refused. At the first missing segment
+ * the rest is appended as is; the result need not exist. A `.` or `..` after a missing segment is
+ * refused, since the kernel would fail with ENOENT. A trailing slash after a missing segment is
+ * dropped: it names a folder still to be made, as `mkdir` accepts.
  *
  * Never pass the input through `path.resolve` or `path.normalize` first: they collapse `..` before
  * symlinks are followed.
  */
-export function realPath(path: string): string {
+export function resolveFilesystemPath(path: string): string {
   let current = isAbsolute(path) ? '/' : process.cwd()
-  const pending = segments(path)
-  let missing = false
+  const pending = splitPathSegments(path)
+  let isBeyondExistingPrefix = false
+  let isDirectory = true
   let hops = 0
   while (pending.length > 0) {
     const segment = pending.shift()!
+    if (!isDirectory) {
+      throw new BackupException('E_BACKUP_UNSAFE', `path ${path} traverses a non-directory`)
+    }
+    if (segment === TRAILING_SLASH) continue
+    if (segment === '.') {
+      if (isBeyondExistingPrefix)
+        throw new BackupException('E_BACKUP_UNSAFE', `path ${path} has . after a missing folder`)
+      continue
+    }
     if (segment === '..') {
-      if (missing) {
+      if (isBeyondExistingPrefix) {
         throw new BackupException('E_BACKUP_UNSAFE', `path ${path} has .. after a missing folder`)
       }
       current = dirname(current)
       continue
     }
     const next = join(current, segment)
-    if (missing) {
+    if (isBeyondExistingPrefix) {
       current = next
       continue
     }
-    let stat
-    try {
-      stat = lstatSync(next, { throwIfNoEntry: false })
-    } catch {
-      stat = undefined // ENOTDIR and the like: the kernel would fail here too
-    }
+    const stat = lstatSync(next, { throwIfNoEntry: false })
     if (!stat?.isSymbolicLink()) {
-      missing = stat === undefined
+      isBeyondExistingPrefix = stat === undefined
+      isDirectory = isBeyondExistingPrefix || !!stat?.isDirectory()
       current = next
       continue
     }
@@ -53,7 +68,7 @@ export function realPath(path: string): string {
     }
     const link = readlinkSync(next)
     if (isAbsolute(link)) current = '/'
-    pending.unshift(...segments(link))
+    pending.unshift(...splitPathSegments(link))
   }
   return current
 }

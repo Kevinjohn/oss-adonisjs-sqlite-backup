@@ -1,12 +1,21 @@
 import { prepareDirectory } from '../src/directory.js'
 import { fork, type ChildProcess } from 'node:child_process'
-import { closeSync, mkdtempSync, openSync, rmSync, writeSync } from 'node:fs'
+import fs, {
+  fstatSync,
+  statSync,
+  closeSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { openDatabase } from '../src/native.js'
 
 /** A fresh temporary directory removed by the returned cleanup. */
-export function tempRoot(): { root: string; cleanup: () => void } {
+export function createTemporaryRoot(): { root: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'adonisjs-sqlite-backup-'))
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
@@ -56,18 +65,53 @@ export function startChild(
     const child = fork(new URL('./fixtures/child.ts', import.meta.url), [mode, arg, ...extra], {
       execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
     })
-    child.once('message', (message) =>
-      message === 'ready' ? resolve(child) : reject(new Error(String(message)))
+    let ready = false
+    const timer = setTimeout(
+      () => fail(new Error('Child did not become ready within 5000 ms')),
+      5000
     )
-    child.once('error', reject)
+    const clear = () => {
+      clearTimeout(timer)
+      child.off('error', onError)
+      child.off('exit', onExit)
+      child.off('message', onMessage)
+    }
+    const fail = (error: Error) => {
+      if (ready) return
+      ready = true
+      clear()
+      void stopChild(child).finally(() => reject(error))
+    }
+    const onError = (error: Error) => fail(error)
+    const onExit = (code: number | null, signal: NodeJS.Signals | null) =>
+      fail(new Error(`Child exited before ready (code ${code}, signal ${signal})`))
+    const onMessage = (message: unknown) => {
+      if (message !== 'ready') return fail(new Error(String(message)))
+      ready = true
+      clear()
+      resolve(child)
+    }
+    child.on('message', onMessage)
+    child.once('error', onError)
+    child.once('exit', onExit)
   })
 }
 
 export async function stopChild(child: ChildProcess, signal: NodeJS.Signals = 'SIGKILL') {
   if (child.exitCode !== null || child.signalCode !== null) return
-  const exited = new Promise((resolve) => child.once('exit', resolve))
-  child.kill(signal)
-  await exited
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      child.off('close', done)
+      child.unref()
+      resolve()
+    }, 5000)
+    const done = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    child.once('close', done)
+    child.kill(signal)
+  })
 }
 
 /** Reject if `promise` takes longer than `ms` (turns a livelock into a red test). */
@@ -103,4 +147,20 @@ export function runChild(
 export function prepared<T extends { directory: string }>(input: T): T {
   prepareDirectory(input.directory)
   return input
+}
+
+/** Inject an fsync error for this directory only, leaving per-bundle syncs intact. */
+export function failDirectorySync(directory: string, error: Error): () => void {
+  const { dev, ino } = statSync(directory)
+  const original = fs.fsyncSync
+  fs.fsyncSync = (fd) => {
+    const stat = fstatSync(fd)
+    if (stat.dev === dev && stat.ino === ino) throw error
+    original(fd)
+  }
+  syncBuiltinESMExports()
+  return () => {
+    fs.fsyncSync = original
+    syncBuiltinESMExports()
+  }
 }

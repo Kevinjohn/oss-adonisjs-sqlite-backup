@@ -6,7 +6,7 @@ export interface BackupConfigInput {
   directory?: string
   /** READY bundles kept by `prune` (the `--keep` flag overrides it). Default 7. */
   keep?: number
-  /** Milliseconds to wait for the directory lock before `E_BACKUP_LOCKED`. Default 0. */
+  /** Directory-lock wait before `E_BACKUP_LOCKED`: integer milliseconds 0–2,147,483,647. Default 0. */
   lockTimeoutMs?: number
   /** Refuse non-WAL sources instead of warning. Default false. */
   requireWal?: boolean
@@ -63,6 +63,12 @@ export interface PruneResult {
   removed: string[]
   /** Unfinished bundles (no READY) removed; only possible while holding the lock. */
   abandoned: string[]
-  /** Bundles that could not be removed, with the reason. Prune never throws for these. */
+  /** Bundles that could not be removed, with the reason. These do not cause prune to throw. */
   failed: Array<{ name: string; reason: string }>
+}
+
+/** Observations attached as `pruneProgress` to a prune finalization error. */
+export interface PruneProgress extends PruneResult {
+  /** The final archive sync failed, so removal durability is unconfirmed. */
+  archiveSyncFailed: boolean
 }

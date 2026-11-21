@@ -39,8 +39,8 @@ const isLintable = (path: string) =>
   (/\.[cm]?[jt]sx?$/.test(path) && !isEslintIgnored(path)) || dependencyFiles.includes(path)
 
 /** Files that cannot change the built package. Specs also read docs, workflows and examples. */
-function outsidePackage(path: string): boolean {
-  return /^(docs|examples|tests|\.github)\//.test(path) || /^[^/]+\.md$/.test(path)
+function isOutsidePackage(path: string): boolean {
+  return /^(docs|examples|tests|user-stories|\.github)\//.test(path) || /^[^/]+\.md$/.test(path)
 }
 
 export interface PlanOptions {
@@ -58,60 +58,62 @@ export function planChangedChecks(
   const formattable = present.filter((path) => path !== 'pnpm-lock.yaml')
   const specs = present.filter(isSpec)
   const suite = specs.length < changes.length
-  const packageChanged = paths.some((path) => !outsidePackage(path))
+  const packageChanged = paths.some((path) => !isOutsidePackage(path))
   const formatAll = paths.some((path) => formatterInputs.some((input) => input.test(path)))
 
-  const step = (
-    when: boolean,
-    reason: string,
+  type CheckStepOptions = Omit<ChangedCheckStep, 'label'> & {
+    when: boolean
+    skip: string
+  }
+  const buildCheckStep = (
     label: string,
-    command: string[],
-    options: Omit<ChangedCheckStep, 'label' | 'command'> = {}
-  ): PlannedCheckStep => (when ? { label, command, ...options } : { label, skip: reason })
+    { when, skip, ...stepOptions }: CheckStepOptions
+  ): PlannedCheckStep => (when ? { label, ...stepOptions } : { label, skip })
   // Under --static a suite the files select is named in a skip line instead of run.
-  const suiteStep = (
-    when: boolean,
-    reason: string,
-    label: string,
-    command: string[],
-    stepOptions: Omit<ChangedCheckStep, 'label' | 'command'> = {}
-  ): PlannedCheckStep =>
-    when && staticOnly
-      ? { label, skip: `--static leaves out ${command.join(' ')}` }
-      : step(when, reason, label, command, stepOptions)
-  const specsOnly = step(
-    specs.length > 0,
-    changes.length > 0 ? 'no test files changed' : 'no files changed',
-    'tests',
-    ['pnpm', 'quick:test', ...specs.map((path) => `--files=${path}`)],
-    { countsTests: true, requiresTests: true }
-  )
+  const buildSuiteStep = (label: string, options: CheckStepOptions): PlannedCheckStep =>
+    options.when && staticOnly
+      ? { label, skip: `--static leaves out ${options.command.join(' ')}` }
+      : buildCheckStep(label, options)
+  const specsOnly = buildCheckStep('tests', {
+    when: specs.length > 0,
+    skip: changes.length > 0 ? 'no test files changed' : 'no files changed',
+    command: ['pnpm', 'quick:test', ...specs.map((path) => `--files=${path}`)],
+    countsTests: true,
+    requiresTests: true,
+  })
 
   return [
     formatAll
       ? { label: 'format', command: ['pnpm', 'format:check'] }
-      : step(formattable.length > 0, 'no changed files to format', 'format', [
-          'pnpm',
-          'exec',
-          'prettier',
-          '--check',
-          '--ignore-unknown',
-          '--no-error-on-unmatched-pattern',
-          ...formattable,
-        ]),
+      : buildCheckStep('format', {
+          when: formattable.length > 0,
+          skip: 'no changed files to format',
+          command: [
+            'pnpm',
+            'exec',
+            'prettier',
+            '--check',
+            '--ignore-unknown',
+            '--no-error-on-unmatched-pattern',
+            ...formattable,
+          ],
+        }),
     // The repository's own lint script carries the zero-warning limit for every caller.
-    step(paths.some(isLintable), 'no lintable files changed', 'lint', ['pnpm', 'lint']),
-    step(
-      paths.some(
+    buildCheckStep('lint', {
+      when: paths.some(isLintable),
+      skip: 'no lintable files changed',
+      command: ['pnpm', 'lint'],
+    }),
+    buildCheckStep('typecheck', {
+      when: paths.some(
         (path) =>
           (isTypeScript(path) && !isEslintIgnored(path)) ||
           path === 'tsconfig.json' ||
           dependencyFiles.includes(path)
       ),
-      'no TypeScript or type configuration changed',
-      'typecheck',
-      ['pnpm', 'typecheck']
-    ),
+      skip: 'no TypeScript or type configuration changed',
+      command: ['pnpm', 'typecheck'],
+    }),
     ...(!suite
       ? [specsOnly]
       : staticOnly
@@ -124,7 +126,11 @@ export function planChangedChecks(
               requiresTests: true,
             },
           ]),
-    suiteStep(packageChanged, 'no package source changed', 'build', ['pnpm', 'build']),
+    buildSuiteStep('build', {
+      when: packageChanged,
+      skip: 'no package source changed',
+      command: ['pnpm', 'build'],
+    }),
   ]
 }
 

@@ -3,7 +3,9 @@
  * `db:backup` command through the ace kernel while Lucid keeps writing on its own connection.
  */
 import { test } from '@japa/runner'
-import { chmodSync, existsSync, statSync } from 'node:fs'
+// @ts-expect-error better-sqlite3 does not publish declarations
+import Database from 'better-sqlite3'
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
@@ -17,9 +19,25 @@ import { SqliteBackup } from '../src/sqlite_backup.js'
 import SqliteBackupProvider from '../providers/sqlite_backup_provider.js'
 import { verifyBundle } from '../src/bundles.js'
 import { openDatabase } from '../src/native.js'
-import { countItems, startChild, stopChild, tempRoot, within } from './helpers.js'
+import { acquireLock } from '../src/lock.js'
+import {
+  countItems,
+  failDirectorySync,
+  startChild,
+  stopChild,
+  createTemporaryRoot,
+  within,
+} from './helpers.js'
 
-async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = true) {
+interface BootAppOptions {
+  withBackupConfig?: boolean | 'disabled'
+  backupDirectory?: string
+}
+
+async function bootApp(
+  root: string,
+  { withBackupConfig = true, backupDirectory }: BootAppOptions = {}
+) {
   const live = join(root, 'live.db')
   const ignitor = new IgnitorFactory()
     .withCoreProviders()
@@ -39,7 +57,8 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
         ...(withBackupConfig
           ? {
               backup: defineConfig({
-                directory: withBackupConfig === 'disabled' ? '' : join(root, 'backups'),
+                directory:
+                  withBackupConfig === 'disabled' ? '' : (backupDirectory ?? join(root, 'backups')),
               }),
             }
           : {}),
@@ -60,13 +79,56 @@ async function bootApp(root: string, withBackupConfig: boolean | 'disabled' = tr
   return { app, live }
 }
 
+test('refused implicit create leaves an unsafe root permission unchanged', async ({ assert }) => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root, { backupDirectory: root })
+  try {
+    openDatabase(live).close()
+    chmodSync(root, 0o755)
+    const before = statSync(root).mode & 0o777
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/E_BACKUP_UNSAFE/)
+    assert.equal(statSync(root).mode & 0o777, before)
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
+
+test('create refuses a configured file root without changing its mode or bytes', async ({
+  assert,
+}) => {
+  const { root, cleanup } = createTemporaryRoot()
+  const directory = join(root, 'backup-root')
+  const bytes = Buffer.from('preserve configured file')
+  writeFileSync(directory, bytes, { mode: 0o644 })
+  const beforeMode = statSync(directory).mode & 0o777
+  const { app, live } = await bootApp(root, { backupDirectory: directory })
+  try {
+    openDatabase(live).close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/E_BACKUP_UNSAFE/)
+    assert.equal(statSync(directory).mode & 0o777, beforeMode)
+    assert.deepEqual(readFileSync(directory), bytes)
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
+
 test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
   let root: string
   let cleanup: () => void
   let app: ApplicationService
   let live: string
   group.each.setup(async () => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     ;({ app, live } = await bootApp(root))
     return async () => {
       await app.terminate()
@@ -218,8 +280,8 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
 
 test.group('provider', () => {
   test('without config/backup.ts the binding fails with a fix-it message', async ({ assert }) => {
-    const { root, cleanup } = tempRoot()
-    const { app } = await bootApp(root, false)
+    const { root, cleanup } = createTemporaryRoot()
+    const { app } = await bootApp(root, { withBackupConfig: false })
     try {
       await assert.rejects(() => app.container.make('sqlite.backup'), /node ace configure/)
       assert.isFunction(SqliteBackupProvider)
@@ -234,7 +296,7 @@ test.group('WAL: backup in its own process while the app writes', (group) => {
   let root: string
   let cleanup: () => void
   group.each.setup(() => {
-    ;({ root, cleanup } = tempRoot())
+    ;({ root, cleanup } = createTemporaryRoot())
     return () => cleanup()
   })
 
@@ -333,8 +395,8 @@ test.group('WAL: backup in its own process while the app writes', (group) => {
 test('disabled provider boots; commands recover from an explicit directory and reject directory on writers', async ({
   assert,
 }) => {
-  const { root, cleanup } = tempRoot()
-  const { app, live } = await bootApp(root, 'disabled')
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root, { withBackupConfig: 'disabled' })
   try {
     const db = openDatabase(live)
     db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
@@ -371,7 +433,7 @@ test('disabled provider boots; commands recover from an explicit directory and r
 }).timeout(30_000)
 
 test('command reports the original create failure and its cleanup failure', async () => {
-  const { root, cleanup } = tempRoot()
+  const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   try {
     const db = openDatabase(live)
@@ -391,5 +453,178 @@ test('command reports the original create failure and its cleanup failure', asyn
     delete internalHooks.step
     await app.terminate()
     cleanup()
+  }
+}).timeout(30_000)
+
+test('prune reports observed removals and earlier failures when archive sync fails', async ({
+  assert,
+}) => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root)
+  const directory = join(root, 'backups')
+  try {
+    openDatabase(live).close()
+    prepareDirectory(directory)
+    const oldest = await createBundle({ livePath: live, directory })
+    const newest = await createBundle({ livePath: live, directory })
+    const abandoned = 'bak-utc-20010101-000000-001'
+    const interrupted = 'bak-utc-20010101-000000-002'
+    mkdirSync(join(directory, abandoned))
+    mkdirSync(join(directory, interrupted))
+    internalHooks.step = (step, name) => {
+      if (step === 'prune:unpublished' && name === interrupted) throw new Error('remove failed')
+    }
+    const restoreSync = failDirectorySync(directory, new Error('final archive sync failed'))
+    try {
+      const ace = await app.container.make('ace')
+      ace.ui.switchMode('raw')
+      const command = await ace.exec('db:backup', ['prune', '--keep', '1'])
+      command.assertFailed()
+      command.assertLogMatches(/db:backup prune failed: final archive sync failed/)
+      command.assertLogMatches(new RegExp(`Observed removed bundle: ${oldest.name}`))
+      command.assertLogMatches(new RegExp(`Observed removed unfinished bundle: ${abandoned}`))
+      command.assertLogMatches(new RegExp(`could not remove ${interrupted}: Error: remove failed`))
+      command.assertLogMatches(/Archive sync failed. Removal durability is unconfirmed./)
+      assert.isFalse(existsSync(oldest.path))
+      assert.isTrue(existsSync(newest.path))
+      assert.isFalse(existsSync(join(directory, abandoned)))
+      assert.isTrue(existsSync(join(directory, interrupted)))
+    } finally {
+      restoreSync()
+      delete internalHooks.step
+    }
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+}).timeout(30_000)
+
+test('command reports every native error from failed lock acquisition', async () => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root)
+  const prototype = Database.prototype as {
+    exec: (this: { name: string }, sql: string) => unknown
+    close: (this: { name: string }) => void
+  }
+  const originalExec = prototype.exec
+  const originalClose = prototype.close
+  let lockHandle: { name: string } | undefined
+  prototype.exec = function (sql) {
+    if (this.name.endsWith('/.backup.lock') && sql === 'BEGIN EXCLUSIVE') throw false
+    return originalExec.call(this, sql)
+  }
+  prototype.close = function () {
+    if (this.name.endsWith('/.backup.lock')) {
+      lockHandle = this
+      throw 0
+    }
+    originalClose.call(this)
+  }
+  try {
+    openDatabase(live).close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/backup native cleanup failed: false/)
+    command.assertLogMatches(/backup native cleanup failed: 0/)
+  } finally {
+    prototype.exec = originalExec
+    prototype.close = originalClose
+    try {
+      if (lockHandle) originalClose.call(lockHandle)
+    } finally {
+      try {
+        await app.terminate()
+      } finally {
+        cleanup()
+      }
+    }
+  }
+}).timeout(30_000)
+
+test('command reports rollback and close failures without hiding the create error', async () => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root)
+  const prototype = Database.prototype as {
+    exec: (this: { name: string }, sql: string) => unknown
+    close: (this: { name: string }) => void
+  }
+  const originalExec = prototype.exec
+  const originalClose = prototype.close
+  let lockHandle: { name: string } | undefined
+  prototype.exec = function (sql) {
+    if (this.name.endsWith('/.backup.lock') && sql === 'ROLLBACK')
+      throw new Error('rollback diagnostic')
+    return originalExec.call(this, sql)
+  }
+  prototype.close = function () {
+    if (this.name.endsWith('/.backup.lock')) {
+      lockHandle = this
+      throw new Error('close diagnostic')
+    }
+    originalClose.call(this)
+  }
+  internalHooks.step = (step) => {
+    if (step === 'create:copied') throw new Error('original copy diagnostic')
+  }
+  try {
+    const db = openDatabase(live)
+    db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+    db.close()
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/original copy diagnostic/)
+    command.assertLogMatches(/backup native cleanup failed: Error: rollback diagnostic/)
+    command.assertLogMatches(/backup native cleanup failed: Error: close diagnostic/)
+  } finally {
+    delete internalHooks.step
+    prototype.exec = originalExec
+    prototype.close = originalClose
+    try {
+      if (lockHandle) {
+        try {
+          originalExec.call(lockHandle, 'ROLLBACK')
+        } finally {
+          originalClose.call(lockHandle)
+        }
+      }
+      if (existsSync(join(root, 'backups'))) acquireLock(join(root, 'backups')).release()
+    } finally {
+      try {
+        await app.terminate()
+      } finally {
+        cleanup()
+      }
+    }
+  }
+}).timeout(30_000)
+
+test('command reports a falsy temporary cleanup failure', async () => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app, live } = await bootApp(root)
+  try {
+    const db = openDatabase(live)
+    db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+    db.close()
+    internalHooks.step = (step) => {
+      if (step === 'create:copied') throw new Error('original copy failure')
+      if (step === 'create:cleanup') throw 0
+    }
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    command.assertLogMatches(/original copy failure/)
+    command.assertLogMatches(/backup temp cleanup failed: 0/)
+  } finally {
+    delete internalHooks.step
+    try {
+      await app.terminate()
+    } finally {
+      cleanup()
+    }
   }
 }).timeout(30_000)

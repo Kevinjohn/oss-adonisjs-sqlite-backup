@@ -2,7 +2,7 @@ import { test } from '@japa/runner'
 import { join } from 'node:path'
 import { BACKUP_ERROR_CODES, BackupException } from '../src/errors.js'
 import { defineConfig } from '../src/define_config.js'
-import { bundleName, parseBundleName } from '../src/names.js'
+import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.js'
 import { resolveSqliteSource } from '../src/source.js'
 
 const sqlite = (filename: unknown, client = 'better-sqlite3') => ({
@@ -22,6 +22,8 @@ test.group('config and source resolution', () => {
     assert.throws(() => defineConfig({ directory: '/b', keep: 0 }), /keep/)
     assert.throws(() => defineConfig({ directory: '/b', keep: 1.5 }), /keep/)
     assert.throws(() => defineConfig({ directory: '/b', lockTimeoutMs: -1 }), /lockTimeoutMs/)
+    assert.equal(defineConfig({ lockTimeoutMs: 2_147_483_647 }).lockTimeoutMs, 2_147_483_647)
+    assert.throws(() => defineConfig({ lockTimeoutMs: 2_147_483_648 }), /2147483647/)
     assert.equal(defineConfig({ directory: '' }).directory, '')
     assert.equal(defineConfig({}).directory, '')
   })
@@ -37,6 +39,8 @@ test.group('config and source resolution', () => {
       },
     }
     assert.equal(resolveSqliteSource(multi, 'other'), '/b.db')
+    assert.equal(resolveSqliteSource(sqlite('  /data/app.db  ')), '/data/app.db')
+    assert.equal(resolveSqliteSource(sqlite('/data/app.db  ', 'sqlite3')), '/data/app.db  ')
   })
 
   test('non-file and non-SQLite connections are refused', ({ assert }) => {
@@ -47,6 +51,9 @@ test.group('config and source resolution', () => {
       sqlite(''),
       sqlite(undefined),
       sqlite('file:/a.db?mode=memory'),
+      sqlite('  :memory:  '),
+      sqlite('   '),
+      sqlite('  file:/a.db?mode=memory  '),
     ]) {
       try {
         resolveSqliteSource(config)
@@ -62,8 +69,8 @@ test.group('config and source resolution', () => {
   test('six error codes; bundle names round-trip', ({ assert }) => {
     assert.lengthOf(BACKUP_ERROR_CODES, 6)
     const ms = Date.UTC(2026, 10, 7, 4, 5, 6, 789)
-    assert.equal(bundleName(ms), 'bak-utc-20261107-040506-789')
-    assert.equal(parseBundleName(bundleName(ms)), ms)
-    assert.throws(() => parseBundleName('nope'), /not a bundle name/)
+    assert.equal(requireFormattedBundleName(ms), 'bak-utc-20261107-040506-789')
+    assert.equal(requireBundleTimestamp(requireFormattedBundleName(ms)), ms)
+    assert.throws(() => requireBundleTimestamp('nope'), /not a bundle name/)
   })
 })

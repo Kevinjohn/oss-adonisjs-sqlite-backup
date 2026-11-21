@@ -11,7 +11,7 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release l
 archive's SHA-256.
 
 ```sh
-pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.2.0/kevinjohn-adonisjs-sqlite-backup-0.2.0.tgz
+pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.3.2/kevinjohn-adonisjs-sqlite-backup-0.3.2.tgz
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 
@@ -27,6 +27,12 @@ node ace configure @kevinjohn/adonisjs-sqlite-backup
 | `node ace db:backup verify [--bundle name]`                        | Re-checks READY, size, SHA-256 and integrity of a bundle (default: newest)                       | no   |
 | `node ace db:backup restore-prepare --target path [--bundle name]` | Copies a bundle to a new path and verifies the copy. Never replaces the live database            | no   |
 | `node ace db:backup prune [--keep n]`                              | Keeps the newest `n` READY bundles (default: `keep` in config) and removes unfinished ones       | yes  |
+
+Prune counts READY markers; it does not verify each bundle's database. READY means published, not
+that the bundle remains readable or recoverable. Before pruning, verify recovery points with
+`db:backup verify` and retain a separate known-good copy until the recovery point you intend to
+keep has passed verification. A damaged READY bundle still counts toward `--keep` and can displace
+an older usable bundle from retention.
 
 A bundle is a real directory (never a symlink) named `bak-utc-YYYYMMDD-HHMMSS-mmm` with a valid
 date, holding `db.sqlite`, `manifest.json` and `READY`, all read-only. Names only increase within
@@ -44,11 +50,23 @@ not read it, such as `prune --bundle`, is refused.
 `defineConfig({ directory: undefined })` and an empty directory disable configured operations.
 The provider still boots; service operations without a recovery directory fail with
 `E_BACKUP_DISABLED`. Retention defaults to seven READY bundles.
+The directory lock timeout (`lockTimeoutMs`) defaults to 0 and accepts integer milliseconds from
+0 through 2,147,483,647. Prune reports `E_BACKUP_LOCKED` immediately if a backup lock on the
+same event loop is already held. It can wait up to the timeout for a lock held in another process.
 
 At application startup, call `backup.checkSource()` and `backup.prepareDirectory()` once before
-scheduling `backup.create()` followed by `backup.prune()`. Preparation creates or tightens the root
-to mode `0700`; create and prune never recreate a missing root. A vanished root is
+scheduling `backup.create()` followed by `backup.prune()`. Preparation creates missing directories
+and tightens an existing directory to mode `0700`; an existing non-directory root is refused. The
+manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
+and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
+If prune fails while syncing the archive or releasing its lock, the command exits nonzero and
+reports the removals it observed and any per-bundle errors. A failed archive sync leaves removal
+durability unconfirmed. Programmatic callers can read the same details from the error's
+`pruneProgress` property.
+
+Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
+provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
 
@@ -58,12 +76,30 @@ Standalone hosts can import `prepareDirectory(path)`, `createBundle`, `listBundl
 exclusive lock. Borrowed handles remain open on success and failure; the package closes only
 handles it opens. The service also accepts `backup.create({ database })`.
 
+Standalone callers can also import `acquireLock(directory, timeoutMs)` to coordinate their own
+work with package backup operations. The caller must provide an existing private directory on a
+local filesystem and keep its ancestors writable only by trusted users or sticky, as described
+under Limits. The direct function does not check root privacy. Keep the returned lock object
+referenced until `release()`. The `.backup.lock` file contains no application data. Damaged-lock
+repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
+
+Filesystem paths are resolved segment by segment, so `..` follows symlink targets. Package-owned
+source connections and restore targets are refused if the native SQLite driver changes the selected
+filename spelling; this does not promise support for every kernel filename form. Borrowed
+better-sqlite3 handles remain supported and are not closed by the package.
+
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. `createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
 manifest field `migrations: { table, count, last }` records the journal's row count and last name.
 Verify and restore preparation check that metadata against the copy. Databases without the table
 keep their manifests free of this field.
+
+Verification uses package-opened SQLite connections. Functions, collations or extensions
+registered only on the application's connection are not available to those connections. A schema
+that depends on them may fail verification when the missing feature is exercised; in that case the
+package refuses to publish the bundle. The package has no initializer hook for registering
+connection-local SQL features on its verification connections.
 
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
@@ -81,7 +117,8 @@ with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
   the same path.
 - The snapshot records the primary connection's migrations table and follows the backup config's
   `lockTimeoutMs` and `requireWal`, like `db:backup create`.
-- An empty or in-memory database is migrated without a snapshot.
+- A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
+  without a snapshot. Views or SQLite header metadata alone do not meet the table condition.
 - If the snapshot cannot be written, nothing is migrated and the command exits 1 with
   `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
 - The primary connection must use `better-sqlite3`.
@@ -104,11 +141,16 @@ Three exports support commands that must own the database while the server is st
 - `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
   example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
   pool of one, and the database is an existing file. It returns the file path.
-- `withOperatorDatabase(db, work)` puts the pool's only handle in EXCLUSIVE locking mode, runs
-  `work(connection)`, then closes every connection. Lucid queries inside `work` use that handle. If
-  another process has the file open it throws
-  `Another process holds this database; stop the server and retry`. The pool is closed after every
-  outcome; when a cleanup step also fails, an `AggregateError` carries both failures.
+- `withOperatorDatabase(db, work)` keeps the primary pool's only handle checked out in EXCLUSIVE
+  locking mode through `work(connection)`, then attempts to close every managed connection. Lucid
+  queries and transactions on the primary connection borrow that handle in sequence. An overlapping
+  call on the same `Database` is refused before taking cleanup ownership. Actual `SQLITE_BUSY`
+  contention while taking the lock throws
+  `Another process holds this database; stop the server and retry`; an idle open connection alone
+  does not imply contention or prove that a server is running. Failed cleanup is reported, including
+  lifecycle failures emitted by Lucid and the pool. When work and cleanup both fail, an
+  `AggregateError` preserves the failures in order. The callback must finish its transactions and
+  leave the borrowed handle open.
 - `syncPath(path)` fsyncs a file or directory.
 
 ```ts
@@ -128,6 +170,11 @@ await withOperatorDatabase(db, async () => {
 lies inside the backup folder. It stops at a verified copy. Switching the app to it is your decision: stop the
 app, point the Lucid connection at the staged file (or move it into place), start the app and
 check it. Keep the old file until you are satisfied.
+
+If the process is interrupted after the copy creates the target but before `restore-prepare`
+returns, the target may remain incomplete or unverified. Its existence does not show that
+verification finished. Inspect and remove only that chosen target before retrying; the retry
+refuses an existing target. The bundle remains the recovery source.
 
 ## Errors
 
@@ -168,4 +215,4 @@ a later successful prune removes it.
 
 ## User story catalogue
 
-See the [source-reviewed user story catalogue](user-stories/README.md) for capability coverage and code-backed action flows.
+See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed action flows.

@@ -16,6 +16,7 @@ As a host operator, I want to retain only the newest configured number of READY 
 | `--keep` | Number flag | Optional; defaults to configured `keep` (default 7); must be integer at least 1 |
 
 - Under the backup lock, prune keeps newest `keep` READY bundles and removes older READY bundles plus matching unfinished directories.
+- READY controls retention membership only; prune does not verify each bundle's readability or recoverability. A damaged READY bundle still counts toward `keep`, so verify recovery points with `db:backup verify` and retain a separate known-good copy before pruning when recovery matters.
 - For a READY bundle it removes READY first, then removes the directory, so interruption during removal cannot leave a broken published bundle.
 - It touches only directories matching the bundle naming pattern. Per-bundle removals that fail are returned and warned; any failure makes command exit nonzero.
 - `prune` always uses configured root; `--directory` is not accepted. If root disappears, it is not recreated during prune.
@@ -42,7 +43,7 @@ flowchart TD
     A["DbBackup.run prune case"] --> B["SqliteBackup.prune({keep})"]
     B --> C["pruneBundles"]
     C --> D["Validate keep, assertDirectory, acquireLock"]
-    D --> E["bundleDirectories and split READY from unfinished"]
+    D --> E["listBundleDirectoryNames and split READY from unfinished"]
     E --> F["Select older READY rows and all unfinished rows"]
     F --> G["unlink READY, syncPath, then rmSync directory"]
     G --> H["Collect removed, abandoned and failed results"]

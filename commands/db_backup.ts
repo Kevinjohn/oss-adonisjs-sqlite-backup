@@ -1,6 +1,9 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { BackupException } from '../src/errors.js'
+import { resolveFilesystemPath } from '../src/paths.js'
+import { assertSafeLayout } from '../src/source.js'
+import type { PruneProgress, PruneResult } from '../src/types.js'
 
 const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
@@ -12,7 +15,7 @@ const FLAG_ACTIONS = {
   directory: ['list', 'verify', 'restore-prepare'],
 } as const satisfies Record<string, readonly (typeof ACTIONS)[number][]>
 
-const listOf = (items: readonly string[]) =>
+const formatFlagActionNames = (items: readonly string[]) =>
   items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join('')
 
 /** `node ace db:backup <create|list|verify|restore-prepare|prune>` */
@@ -39,6 +42,12 @@ export default class DbBackup extends BaseCommand {
   })
   declare directory?: string
 
+  private reportPruneFailures(failures: PruneResult['failed']) {
+    for (const failure of failures) {
+      this.logger.warning(`could not remove ${failure.name}: ${failure.reason}`)
+    }
+  }
+
   async run() {
     try {
       const backup = await this.app.container.make('sqlite.backup')
@@ -47,12 +56,13 @@ export default class DbBackup extends BaseCommand {
         if (!(actions as readonly string[]).includes(this.action)) {
           throw new BackupException(
             'E_BACKUP_UNSAFE',
-            `--${flag} is only supported for ${listOf(actions)}`
+            `--${flag} is only supported for ${formatFlagActionNames(actions)}`
           )
         }
       }
       switch (this.action) {
         case 'create': {
+          assertSafeLayout(backup.livePath(), resolveFilesystemPath(backup.config.directory))
           backup.prepareDirectory()
           const result = await backup.create()
           for (const warning of result.warnings) this.logger.warning(warning)
@@ -81,9 +91,7 @@ export default class DbBackup extends BaseCommand {
         }
         case 'prune': {
           const result = await backup.prune({ keep: this.keep })
-          for (const failure of result.failed) {
-            this.logger.warning(`could not remove ${failure.name}: ${failure.reason}`)
-          }
+          this.reportPruneFailures(result.failed)
           this.logger.success(
             `Pruned ${result.removed.length} bundle(s), ${result.abandoned.length} unfinished`
           )
@@ -98,9 +106,39 @@ export default class DbBackup extends BaseCommand {
       }
     } catch (error) {
       const code = error instanceof BackupException ? `${error.code}: ` : ''
-      this.logger.error(`db:backup ${this.action} failed: ${code}${(error as Error).message}`)
-      const cleanupError = (error as { cleanupError?: unknown }).cleanupError
-      if (cleanupError) this.logger.error(`backup temp cleanup failed: ${String(cleanupError)}`)
+      const message = error instanceof Error ? error.message : String(error)
+      this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+      const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)
+        ?.pruneProgress
+      if (progress) {
+        this.reportPruneFailures(progress.failed)
+        for (const name of progress.removed) this.logger.warning(`Observed removed bundle: ${name}`)
+        for (const name of progress.abandoned)
+          this.logger.warning(`Observed removed unfinished bundle: ${name}`)
+        if (progress.archiveSyncFailed) {
+          this.logger.warning('Archive sync failed. Removal durability is unconfirmed.')
+        }
+      }
+      if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
+        this.logger.error(
+          `backup temp cleanup failed: ${String((error as { cleanupError?: unknown }).cleanupError)}`
+        )
+      const resourceErrors =
+        (error !== null && typeof error === 'object'
+          ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+          : undefined) ??
+        (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError')
+          ? error.errors
+          : [])
+      for (const resourceError of resourceErrors) {
+        this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
+        const nestedErrors =
+          resourceError !== null && typeof resourceError === 'object'
+            ? (resourceError as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+            : undefined
+        for (const nestedError of nestedErrors ?? [])
+          this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
+      }
       this.exitCode = 1
     }
   }
