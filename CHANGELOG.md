@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-11-21
+
 - `db:upgrade` exits non-zero when a migration fails on every Lucid 22 release. With Lucid 22.0 or
   22.1, schema generation after a failed migration reset the exit code to 0. `db:upgrade` now runs
   `migration:run --no-schema-generate`, then `schema:generate` only after a successful migration.
