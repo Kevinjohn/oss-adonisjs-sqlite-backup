@@ -22,6 +22,8 @@ As a host operator, I want to guard a custom Ace command with `operatorDatabaseP
 - The helpers do not detect a running server; stopping it is the operator's responsibility, confirmed through `confirmServerStopped`.
 - `db.manager.closeAll()` is attempted after success and after every failure after ownership begins; overlapping calls are refused earlier. Refused owner release and Lucid or Tarn cleanup events are reported even when their cleanup promises resolve. A cleanup failure is reported alone when work succeeded, otherwise in an `AggregateError` carrying the first failure and cleanup failures in order.
 
+- The host receives the callback’s resolved value after successful cleanup. For a custom command that creates a backup using the pinned native handle, follow the [borrowed-source integration story](../integration/us-int-01-programmatic-backups.md) and finish any transaction first. [Operator implementation](../../src/operator.ts)
+
 ## User flow
 
 ```mermaid

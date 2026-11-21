@@ -19,6 +19,8 @@ As a host operator, I want to list READY bundles so that I can see available rec
 - An existing empty directory prints no bundle names; a missing directory fails. A concurrently removed publication is skipped; a READY bundle with unreadable manifest fails and identifies the bundle.
 - Listing is lock-free and does not alter bundles. The override also works when configured operations are disabled.
 
+- The service returns summaries with name, path and creation time. Ace prints names. Listing requires a regular READY marker and a regular manifest with a canonical UTC timestamp, and does not hash or open the database. [Manifest reader](../../src/bundles.ts)
+
 ## User flow
 
 ```mermaid

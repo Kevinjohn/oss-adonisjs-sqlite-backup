@@ -25,6 +25,8 @@ As an application operator, I want to configure the Lucid connection, private ba
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
 - A caller using exported `acquireLock(directory, timeoutMs)` directly must provide an existing private directory on a local filesystem, with ancestors writable only by trusted users or sticky as described in the README limits. `acquireLock` itself does not check root privacy. Keep the returned lock referenced through `release()`. `.backup.lock` contains no application data. Damaged-lock repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
+- If the app resolves the singleton without a backup config, the provider raises `E_BACKUP_SOURCE` with the configure command. Missing config differs from a present config with an empty directory, for which archive overrides are available. [Provider](../../providers/sqlite_backup_provider.ts), [application tests](../../tests/app.spec.ts)
+
 ## User flow
 
 ```mermaid

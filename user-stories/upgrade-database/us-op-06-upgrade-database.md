@@ -12,15 +12,15 @@ As a host operator, I want the `db:upgrade` Ace command to create a verified pre
 
 ## Acceptance criteria
 
-| Option                 | Control      | Required/default/conditions                                                                                      |
-| ---------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `--no-schema-generate` | Boolean flag | Optional; `--schema-generate` defaults to true. When off, `--no-schema-generate` is passed on to `migration:run` |
+| Option                 | Control      | Required/default/conditions                                                                        |
+| ---------------------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `--no-schema-generate` | Boolean flag | Optional; `--schema-generate` defaults to true. When off, skip the separate schema-generation step |
 
 - The command refuses with `Upgrade failed: …` and exit code 1 when the primary connection is not `better-sqlite3`.
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated without a pre-migration backup bundle. Views or SQLite header metadata alone do not meet the table condition.
 - Otherwise it writes a verified bundle to `pre-migration` under the configured backup `directory`, or to `<database>.backups` beside the database when no directory is configured, and reports `Pre-upgrade backup written <path>`. These bundles are outside `db:backup prune` retention.
 - The bundle uses the primary connection's migrations table (`migrations.tableName`, default `adonis_schema`) and the backup config's `lockTimeoutMs` and `requireWal`, as `db:backup create` does. A non-WAL source is reported as a warning, or refused with `requireWal: true`.
-- If the bundle cannot be written, nothing is migrated and the command exits 1. Otherwise it runs `migration:run --force`; a failed migration exits with that command's exit code.
+- If the bundle cannot be written, nothing is migrated and the command exits 1. Otherwise it runs `migration:run --force --no-schema-generate`. A migration failure propagates its error and exit code and skips generation. After success outside production, schema generation runs by default on the primary connection. Its failure propagates separately.
 
 ## User flow
 
@@ -36,7 +36,8 @@ flowchart TD
     F -->|Yes| G
     G --> H{"Migrations succeed?"}
     H -->|No| I["See migration error; restore-prepare from the bundle if needed"]
-    H -->|Yes| J["Database migrated"]
+    H -->|Yes| J["Generate schema if enabled outside production"]
+    J --> K["Report completion or generator failure"]
 ```
 
 ## Code flow
@@ -50,14 +51,16 @@ flowchart TD
     C -->|No| X["Throw; catch logs Upgrade failed; exitCode 1"]
     C -->|Yes| D["Query sqlite_master for a table"]
     D --> E{"dbPath is not :memory: and a table exists?"}
-    E -->|No| H["kernel.exec migration:run --force"]
+    E -->|No| H["kernel.exec migration:run --force --no-schema-generate"]
     E -->|Yes| F["preMigrationBackupDirectory; prepareDirectory"]
     F --> G["createBundle with livePath, directory, migrations table, lockTimeoutMs and requireWal; log warnings"]
     G -->|failure| X
     G -->|success| H
     H --> I{"migrate.exitCode is 0?"}
     I -->|No| J["Copy migrate.error and exit code"]
-    I -->|Yes| K["Exit 0"]
+    I -->|Yes| K{"Generation enabled outside production?"}
+    K -->|No| L["Finish successfully"]
+    K -->|Yes| M["Run schema:generate for primary connection and propagate failure"]
 ```
 
 **Code references:** [command](../../commands/db_upgrade.ts), [pre-migration backup directory](../../src/upgrade.ts), [createBundle](../../src/bundles.ts), [upgrade tests](../../tests/upgrade.spec.ts), [README upgrade contract](../../README.md#upgrading-a-database).

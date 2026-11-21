@@ -19,6 +19,8 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
 - `create` uses only configured backup directory; `--directory` is invalid for this action.
 
+- Create compares every ordered row of the source migration journal with the copy. A missing journal omits migration metadata. Unsupported metadata prevents publication. [Adoption scenarios](../../tests/adoption.spec.ts)
+
 ## User flow
 
 ```mermaid

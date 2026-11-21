@@ -23,6 +23,8 @@ As a host operator, I want to stage and verify a selected bundle at a new path s
 - Success stops at a verified copy. It never replaces the live database or changes Lucid configuration. Stopping the app, switching paths, restarting and checking data remain operator decisions; retain the old file until satisfied.
 - Operation is lock-free; a concurrently pruned source may fail verification.
 
+- Restore requires a regular marker and manifest and rejects a linked or other non-regular database member before copying. The staged file passes byte, SQLite and optional migration checks before its file and parent directory are synced. [Restore implementation](../../src/restore.ts), [regular-file regressions](../../tests/verify_restore.spec.ts)
+
 ## User flow
 
 ```mermaid

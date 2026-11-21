@@ -20,6 +20,8 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 - A `--bundle` value that is not a valid bundle name, or that names something other than a real directory (for example a file or symlink), is refused with `E_BACKUP_UNSAFE` before any check runs. A missing bundle is `E_BACKUP_NOT_FOUND`; unreadable/mismatched content is `E_BACKUP_INVALID`. Default newest selection reports `E_BACKUP_NOT_FOUND` if prune unpublishes it. A named selection may report `E_BACKUP_INVALID` for a missing READY marker when unpublication occurs before its readiness snapshot.
 - Verification is read-only and lock-free; a concurrent prune may cause the operation to fail.
 
+- READY, manifest and database must be regular files. A format-1 manifest may omit migrations. With migration metadata, verify compares the declared main journal’s row count and final name in ID order. It counts every foreign-key violation using an iterator. Default selection reads the chosen manifest without parsing older malformed manifests. [Recovery scenarios](../../tests/adoption.spec.ts), [regular-file tests](../../tests/verify_restore.spec.ts), [SQLite checks](../../src/checks.ts)
+
 ## User flow
 
 ```mermaid
