@@ -151,7 +151,7 @@ test.group('pruneBundles', (group) => {
   }
 
   test('keeps the listing error and attaches rollback failure', ({ assert }) => {
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const primary = new Error('directory listing failed')
     const { failure, rollbackError } = pruneWithFailures({ error: primary })
     assert.strictEqual(failure, primary)
@@ -161,7 +161,7 @@ test.group('pruneBundles', (group) => {
   })
 
   test('keeps both failures when pruning throws a non-Error', ({ assert }) => {
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const { failure, rollbackError } = pruneWithFailures({ error: undefined })
     assert.instanceOf(failure, AggregateError)
     assert.deepEqual((failure as AggregateError).errors, [undefined, rollbackError])
@@ -171,7 +171,7 @@ test.group('pruneBundles', (group) => {
   })
 
   test('reports a listing failure even when lock release succeeds', ({ assert }) => {
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const primary = new Error('directory listing failed')
     internalHooks.step = (step) => {
       if (step === 'list:read') throw primary
@@ -185,7 +185,7 @@ test.group('pruneBundles', (group) => {
   })
 
   test('reports a release-only failure', ({ assert }) => {
-    mkdirSync(directory)
+    mkdirSync(directory, { mode: 0o700 })
     const { failure, rollbackError } = pruneWithFailures()
     assert.strictEqual(failure, rollbackError)
   })
