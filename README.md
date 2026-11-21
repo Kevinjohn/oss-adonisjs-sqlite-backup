@@ -122,7 +122,8 @@ with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
 - If the snapshot cannot be written, nothing is migrated and the command exits 1 with
   `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
 - The primary connection must use `better-sqlite3`.
-- `--no-schema-generate` is passed on to `migration:run`.
+- Schema classes are generated with `schema:generate` only after every migration succeeds, and not
+  in production. `--no-schema-generate` skips them.
 
 To add a check after migrating, run the command from your own:
 

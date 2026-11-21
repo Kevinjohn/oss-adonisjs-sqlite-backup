@@ -7,6 +7,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   statSync,
@@ -14,7 +15,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
@@ -28,6 +29,15 @@ import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 // Migration files live in a temporary directory, so they import Lucid by absolute URL.
 const schemaModule = pathToFileURL(createRequire(import.meta.url).resolve('@adonisjs/lucid/schema'))
+
+// Lucid sets migration:run's `error` from 22.4.0; earlier releases only log it.
+const lucidEntry = createRequire(import.meta.url).resolve('@adonisjs/lucid')
+const lucidPackage = join(dirname(lucidEntry), '..', 'package.json')
+const { version: lucidVersion } = JSON.parse(readFileSync(lucidPackage, 'utf8')) as {
+  version: string
+}
+const lucidMinor = Number(lucidVersion.split('.')[1])
+const lucidReportsMigrationError = lucidMinor >= 4
 
 function writeMigration(root: string, name: string, body: string) {
   const directory = join(root, 'database', 'migrations')
@@ -357,7 +367,11 @@ test.group('db:upgrade', (group) => {
     app = booted.app
     const command = await booted.upgrade()
     assert.isAbove(command.exitCode ?? 0, 0)
-    assert.include(command.error?.message, 'no such table: no_such_table')
+    if (lucidReportsMigrationError) {
+      assert.include(command.error?.message, 'no such table: no_such_table')
+    } else {
+      assert.isUndefined(command.error)
+    }
     const bundle = verifyBundle(`${booted.live}.backups`)
     assert.include(booted.logs(), `Pre-upgrade backup written ${bundle.path}`)
     const database = openDatabase(join(bundle.path, 'db.sqlite'), { readonly: true })
@@ -445,7 +459,47 @@ test.group('db:upgrade', (group) => {
     assert.notInclude(tables(booted.live), 'heroes')
   })
 
-  test('lets migration:run generate schema classes unless told not to', async ({ assert }) => {
+  test('fails when a migration fails even with schema generation on', async ({ assert }) => {
+    writeMigration(root, '001_broken', "await this.db.rawQuery('SELECT * FROM no_such_table')")
+    const booted = await bootApp(root)
+    app = booted.app
+    const command = await booted.upgrade([])
+    assert.isAbove(command.exitCode ?? 0, 0)
+    assert.isFalse(existsSync(join(root, 'database', 'schema.ts')))
+  })
+
+  test('reports a schema generation failure after migrating', async ({ assert }) => {
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    // A directory where the generated file belongs makes schema:generate fail.
+    mkdirSync(join(root, 'database', 'schema.ts'))
+    const booted = await bootApp(root)
+    app = booted.app
+    const command = await booted.upgrade([])
+    assert.isAbove(command.exitCode ?? 0, 0)
+    assert.instanceOf(command.error, Error)
+    assert.include(tables(booted.live), 'heroes')
+  })
+
+  test('does not generate schema classes in production', async ({ assert }) => {
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    const booted = await bootApp(root)
+    app = booted.app
+    Object.defineProperty(booted.app, 'inProduction', { value: true })
+    const command = await booted.upgrade([])
+    command.assertSucceeded()
+    assert.include(tables(booted.live), 'heroes')
+    assert.isFalse(existsSync(join(root, 'database', 'schema.ts')))
+  })
+
+  test('generates schema classes after migrating unless told not to', async ({ assert }) => {
     writeMigration(
       root,
       '001_heroes',

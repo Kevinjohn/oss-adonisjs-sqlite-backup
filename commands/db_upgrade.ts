@@ -56,13 +56,22 @@ export default class DbUpgrade extends BaseCommand {
         for (const warning of bundle.warnings) this.logger.warning(warning)
         this.logger.success(`Pre-upgrade backup written ${bundle.path}`)
       }
-      const migrate = await this.kernel.exec('migration:run', [
-        '--force',
-        ...(this.schemaGenerate ? [] : ['--no-schema-generate']),
-      ])
+      const migrate = await this.kernel.exec('migration:run', ['--force', '--no-schema-generate'])
       if (migrate.exitCode !== 0) {
         this.error = migrate.error
         this.exitCode = migrate.exitCode ?? 1
+        return
+      }
+      // Generated here, not by migration:run: Lucid 22.0 and 22.1 generate after a failed
+      // migration too, and the generator's exit code replaces the failure.
+      if (this.schemaGenerate && !this.app.inProduction) {
+        const generate = await this.kernel.exec('schema:generate', [
+          `--connection=${db.primaryConnectionName}`,
+        ])
+        if (generate.exitCode !== 0) {
+          this.error = generate.error
+          this.exitCode = generate.exitCode ?? 1
+        }
       }
     } catch (error) {
       this.logger.error(`Upgrade failed: ${String(error)}`)
