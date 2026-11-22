@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-11-22
+
+- Refuse to prepare a backup directory containing the configured live database before changing
+  directory permissions. Clarify that the backup service entry point is available since v0.4.0.
+
 ## 0.4.0 - 2026-11-21
 
 - Document and verify the package user stories and implementation flows.
