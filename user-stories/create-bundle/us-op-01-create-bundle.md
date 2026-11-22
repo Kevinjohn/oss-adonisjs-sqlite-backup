@@ -15,7 +15,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - `createBundle()` validates private directory/source layout and holds `.backup.lock` for its run. It refuses a borrowed handle with an open transaction; a borrowed handle stays open afterward.
 - The copy is made using SQLite backup, journal and migration metadata are checked, `readDatabaseIntegrityProblem()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
 - Verification uses package-opened SQLite connections. SQL functions, collations or extensions registered only on the application's connection are not registered on those handles. A schema that depends on them, such as an expression index using an application-registered function, may fail verification; create fails closed and does not publish the bundle. There is no connection initializer hook.
-- The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero; cleanup failure is separately reported.
+- The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero. If cleanup fails, inspect the cleanup error and the archive before retrying. A bundle may remain visible if its READY marker could not be removed.
 - Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
 - `create` uses only configured backup directory; `--directory` is invalid for this action.
 
@@ -39,10 +39,13 @@ flowchart TD
     Y -->|Yes| Z["Refuse E_BACKUP_UNSAFE; fix clock or move that bundle"]
     Y -->|No| D["Copy, normalize copy to DELETE, verify and write manifest"]
     D --> E{"All checks pass?"}
-    E -->|No| F["Report failure; unfinished bundle is not published"]
-    E -->|Yes| G["Write READY last and finish resource cleanup"]
-    G -->|Cleanup succeeds| H["Report warnings and bundle path"]
-    G -->|Cleanup fails| F
+    E -->|No| F["Report failure"]
+    E -->|Yes| G["Write READY last, sync and finish resource cleanup"]
+    G -->|Success| H["Report warnings and bundle path"]
+    G -->|Failure| F
+    F --> T{"READY absent or removed?"}
+    T -->|Yes| U["No bundle published"]
+    T -->|No or unknown| V["Inspect cleanup error and archive before retrying; bundle may still be listed"]
 ```
 
 ## Code flow
@@ -81,12 +84,12 @@ flowchart TD
     M -->|failure| V
     G -->|failure| V
     H -->|failure| V
-    V --> U["Record primary error and any cleanupError"]
+    V --> U["Record primary error and any cleanupError; failed READY removal can leave the bundle visible"]
     I --> T["Finally: attempt owned source close and lock.release independently"]
     U --> T
     T --> T1{"Primary or resource cleanup failure?"}
     T1 -->|Primary failure| T2["Throw primary error with resource cleanup diagnostics"]
-    T1 -->|Cleanup only| T3["Attempt unpublication and owned bundle removal; throw cleanup failure"]
+    T1 -->|Cleanup only| T3["Attempt unpublication and owned bundle removal; throw failure and attach any cleanupError"]
     T1 -->|Neither| T4["Return result"]
 ```
 

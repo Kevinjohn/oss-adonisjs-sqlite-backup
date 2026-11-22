@@ -5,7 +5,7 @@ import type { NativeDatabase } from './native.js'
 import { resolveFilesystemPath } from './paths.js'
 import { pruneBundles } from './prune.js'
 import { prepareRestore } from './restore.js'
-import { isWithin, openOwnedSource, resolveSqliteSource } from './source.js'
+import { assertSourceOutsideDirectory, openOwnedSource, resolveSqliteSource } from './source.js'
 import type { BackupConfig, LucidDatabaseConfig } from './types.js'
 
 /** Backup service bound in the container as `sqlite.backup`. */
@@ -45,8 +45,11 @@ export class SqliteBackup {
     }
   }
 
+  /** Prepare the root after checking it does not contain the configured live database. */
   prepareDirectory(): void {
-    prepareDirectory(this.requireBackupDirectory())
+    const directory = resolveFilesystemPath(this.requireBackupDirectory())
+    this.rejectLiveDatabaseInside(directory)
+    prepareDirectory(directory)
   }
 
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
@@ -82,8 +85,7 @@ export class SqliteBackup {
     })
   }
 
-  prune(options: { keep?: number } = {}) {
-    const directory = resolveFilesystemPath(this.requireBackupDirectory())
+  private rejectLiveDatabaseInside(directory: string): void {
     let livePath: string | undefined
     try {
       livePath = resolveSqliteSource(this.database, this.config.connection)
@@ -91,12 +93,12 @@ export class SqliteBackup {
       // A service can create backups from borrowed handles without a configured file source.
       if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_SOURCE') throw error
     }
-    if (livePath !== undefined && isWithin(directory, livePath)) {
-      throw new BackupException(
-        'E_BACKUP_UNSAFE',
-        `backup directory ${directory} contains the live database`
-      )
-    }
+    if (livePath !== undefined) assertSourceOutsideDirectory(livePath, directory)
+  }
+
+  prune(options: { keep?: number } = {}) {
+    const directory = resolveFilesystemPath(this.requireBackupDirectory())
+    this.rejectLiveDatabaseInside(directory)
     return pruneBundles({
       directory,
       keep: options.keep ?? this.config.keep,

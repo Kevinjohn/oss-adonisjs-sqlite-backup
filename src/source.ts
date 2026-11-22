@@ -71,6 +71,11 @@ export function assertSafeLayout(livePath: string, directory: string): void {
       `live database ${livePath} is not an existing file`
     )
   }
+  assertSourceOutsideDirectory(livePath, directory)
+}
+
+/** Reject a backup directory containing the configured live path. Both paths are canonical. */
+export function assertSourceOutsideDirectory(livePath: string, directory: string): void {
   if (isWithin(directory, livePath)) {
     throw new BackupException(
       'E_BACKUP_UNSAFE',

@@ -3,6 +3,7 @@ import { prepared } from './helpers.js'
 import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -37,6 +38,57 @@ test.group('createBundle', (group) => {
   group.each.setup(() => {
     ;({ root, cleanup } = createTemporaryRoot())
     return () => cleanup()
+  })
+
+  test('service preparation refuses the live directory before changing its mode', ({ assert }) => {
+    const directory = join(root, 'live')
+    const live = join(directory, 'live.db')
+    const directoryAlias = join(root, 'root-alias')
+    const liveAlias = join(root, 'database-alias')
+    mkdirSync(directory)
+    chmodSync(directory, 0o750)
+    makeLiveDatabase(live).close()
+    symlinkSync(directory, directoryAlias)
+    symlinkSync(live, liveAlias)
+
+    for (const [backupRoot, filename] of [
+      [directory, live],
+      [directoryAlias, live],
+      [directory, liveAlias],
+    ]) {
+      const backup = new SqliteBackup(
+        { directory: backupRoot, keep: 7, lockTimeoutMs: 0, requireWal: false },
+        {
+          connection: 'main',
+          connections: { main: { client: 'sqlite3', connection: { filename } } },
+        }
+      )
+      backup.checkSource()
+      assert.throws(() => backup.prepareDirectory(), /contains the live database/)
+      assert.equal(statSync(directory).mode & 0o777, 0o750)
+    }
+  })
+
+  test('service preparation supports a borrowed database without Lucid config', async ({
+    assert,
+  }) => {
+    const directory = join(root, 'backups')
+    const database = makeLiveDatabase(join(root, 'live.db'))
+    const backup = new SqliteBackup(
+      { directory, keep: 7, lockTimeoutMs: 0, requireWal: false },
+      undefined
+    )
+    try {
+      backup.prepareDirectory()
+      const result = await backup.create({ database })
+      assert.deepEqual(
+        backup.list().map(({ name }) => name),
+        [result.name]
+      )
+      assert.isNumber(database.pragma('schema_version', { simple: true }))
+    } finally {
+      database.close()
+    }
   })
 
   test('owned reads refuse a source filename changed by the native driver', async ({ assert }) => {
