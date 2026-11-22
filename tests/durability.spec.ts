@@ -1,9 +1,10 @@
 import { prepared } from './helpers.js'
 /** Every publish step is fsynced in order: file, then its directory, before the next step. */
 import { test } from '@japa/runner'
-import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import fs, { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
 import { join, relative } from 'node:path'
-import { createBundle } from '../src/bundles.js'
+import { createBundle, listBundles } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
 import { writeAll } from '../src/fs.js'
 import { internalHooks } from '../src/internal_hooks.js'
@@ -43,6 +44,39 @@ test.group('durability', (group) => {
       'sync b/BUNDLE',
       'sync b',
     ])
+  })
+
+  test('a failed READY removal leaves the bundle listed and reports the cleanup error', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    const directory = join(root, 'b')
+    makeLiveDatabase(live).close()
+    const input = prepared({ livePath: live, directory })
+    const syncError = new Error('sync failed after writing READY')
+    const cleanupError = new Error('could not remove READY')
+    const originalUnlink = fs.unlinkSync
+
+    internalHooks.durability = (event, path) => {
+      if (event === 'sync' && fs.existsSync(join(path, 'READY'))) throw syncError
+    }
+    fs.unlinkSync = (path) => {
+      if (String(path).endsWith('/READY')) throw cleanupError
+      originalUnlink(path)
+    }
+    syncBuiltinESMExports()
+    try {
+      const failure = await createBundle(input).then(
+        () => assert.fail('expected bundle creation to fail'),
+        (error: unknown) => error
+      )
+      assert.strictEqual(failure, syncError)
+      assert.strictEqual((failure as { cleanupError?: unknown }).cleanupError, cleanupError)
+      assert.lengthOf(listBundles(directory), 1)
+    } finally {
+      fs.unlinkSync = originalUnlink
+      syncBuiltinESMExports()
+    }
   })
 
   test('first-use nested root syncs every new parent entry before bundle publication', async ({
