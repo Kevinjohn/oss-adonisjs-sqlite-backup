@@ -71,8 +71,8 @@ reports the removals it observed and any per-bundle errors. A failed archive syn
 durability unconfirmed. Programmatic callers can read the same details from the error's
 `pruneProgress` property.
 
-From the next release (or a package built from this checkout), a booted application can import
-the same singleton as the `sqlite.backup` container binding at the new service entry point:
+Starting with v0.4.0, a booted application can import the same singleton as the `sqlite.backup`
+container binding from the service entry point:
 
 ```ts
 import backup from '@kevinjohn/adonisjs-sqlite-backup/services/main'
