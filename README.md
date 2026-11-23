@@ -11,7 +11,7 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release l
 archive's SHA-256.
 
 ```sh
-pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.4.1/kevinjohn-adonisjs-sqlite-backup-0.4.1.tgz
+pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.4.2/kevinjohn-adonisjs-sqlite-backup-0.4.2.tgz
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 

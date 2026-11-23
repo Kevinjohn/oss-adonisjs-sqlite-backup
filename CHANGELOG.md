@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-11-23
+
 - `node ace db:upgrade --help` now describes `--schema-generate` as it behaves: schema classes are
   generated with `schema:generate` after a successful migration, never in production. The flag
   name, default and behaviour are unchanged.
