@@ -63,8 +63,11 @@ same event loop is already held. It can wait up to the timeout for a lock held i
 When configured backups are enabled, call `backup.checkSource()` and `backup.prepareDirectory()`
 once at application startup before scheduling `backup.create()` followed by `backup.prune()`.
 When they are disabled, those calls throw `E_BACKUP_DISABLED`, so the startup example below checks
-the resolved `backup.config.directory` first. Preparation creates missing directories
-and tightens an existing directory to mode `0700`; an existing non-directory root is refused. The
+the resolved `backup.config.directory` first. `backup.prepareDirectory()` refuses a root that
+contains the configured live SQLite database with `E_BACKUP_UNSAFE`, before creating or changing
+anything. Otherwise preparation creates missing directories and tightens an existing directory to
+mode `0700`; an existing non-directory root is refused. The standalone `prepareDirectory(path)`
+has no live database to compare and does not make that check. The
 manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
@@ -99,7 +102,7 @@ and `requireWal` is boolean. Incorrect source settings (`connection`, `requireWa
 usual AdonisJS practice of throwing a framework exception from `defineConfig`: one error type and
 code set covers configuration and backup failures alike.
 
-Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
+Configured preparation and prune refuse a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.

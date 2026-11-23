@@ -2,7 +2,7 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`26b305a36908998114179409a57ead8acfac20b0`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/26b305a36908998114179409a57ead8acfac20b0). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Fetched `origin/main` baseline: [`cecc545f7de44a325bee1a9160b2705556248fee`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/cecc545f7de44a325bee1a9160b2705556248fee). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
