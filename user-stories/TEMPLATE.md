@@ -1,14 +1,14 @@
 # Story format
 
-A story records one meaningful user action and why it matters. Use actual permission roles,
+A story records one meaningful user operation and why it matters. Use actual permission roles,
 actual command/API names and relevant options or form fields. Keep implementation contracts in the repository's
 authoritative decision record, instructions in guides and runnable scenarios in the test suite.
 
-Copy the story example below into `user-stories/backup/US-BACKUP-NN-action.md`; its source links resolve from that copied path. Replace its sample content with source-backed
+Copy the story example below into `user-stories/backup/US-BACKUP-NN-operation.md`; its source links resolve from that copied path. Replace its sample content with source-backed
 details. Keep the writing and maintenance guidance in this TEMPLATE.md, outside individual stories.
 Omit the optional Coverage line when there is no useful test link. The field table is for form
-actions; use the controls/results alternative below for actions without input fields. Adapt both
-diagrams to the actual action rather than retaining the sample save flow.
+operations; use the controls/results alternative below for operations without input fields. Adapt both
+diagrams to the actual operation rather than retaining the sample save flow.
 
 ## Story example
 
@@ -28,7 +28,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 
 - A successful create reports the bundle path; when the source is not using WAL, it also warns that other writers wait for the copy. With `requireWal: true`, it refuses instead.
 - On failure, the command reports the error and exits nonzero. If cleanup of a bundle created by this attempt also fails, it reports that failure separately; the operator can run `prune` to remove unfinished bundles.
-- `create` uses the configured backup directory. `--directory` is refused for this action.
+- `create` uses the configured backup directory. `--directory` is refused for this operation.
 - For source preservation, checked publication, lock scope and cleanup behavior, see [create guarantees and recovery](../REFERENCE.md#create-guarantees-and-recovery).
 
 ## User flow
@@ -73,7 +73,7 @@ flowchart TD
 **Code references:** [command](../../commands/db_backup.ts), [service](../../src/sqlite_backup.ts), [createBundle](../../src/bundles.ts), [durability tests](../../tests/durability.spec.ts).
 ````
 
-## Actions with input fields
+## Operations with input fields
 
 Use this table for actual command/API options or forms. Record required/default state, limits, options, dependent choices, visibility and read-only conditions; do not invent UI controls for an API.
 
@@ -83,10 +83,10 @@ Use this table for actual command/API options or forms. Record required/default 
 | [Exact label or parameter] | [Actual control/type] | [Required/optional, default, limits, options and conditions] |
 ```
 
-## Actions without input fields
+## Operations without input fields
 
 Replace the field table with a short list of controls and their visible results. Do not create
-empty or artificial field rows. For example, a timeline navigation action could use:
+empty or artificial field rows. For example, a timeline navigation operation could use:
 
 ```markdown
 ## Acceptance criteria
@@ -95,25 +95,25 @@ empty or artificial field rows. For example, a timeline navigation action could 
 ```
 
 Use the actual control and behavior in the product. Include confirmation controls and relevant
-cancellation or failure results when they affect the action. Keep both diagrams in these stories.
+cancellation or failure results when they affect the operation. Keep both diagrams in these stories.
 
 ## Writing and maintenance rules
 
 - Use one story per meaningful outcome. An inseparable set of controls may share a story;
-  independently useful actions deserve their own. Create and edit are distinct actions.
-  Keep inputs, decisions and recovery focused on that one action; do not create stories for its
-  internal guards, helpers or technical variants.
+  independently useful operations deserve their own. Create and edit are distinct operations.
+  Keep inputs, decisions and recovery focused on that one operation; do not create stories for its
+  internal checks, helpers or technical variants.
   When splitting, preserve the original ID/path for one outcome and give the other the next unused
   ID; update catalogue references and counts together.
 - Include every relevant field, including conditional and read-only fields. Record exact labels,
   required/optional state, defaults, limits, available options and dependent choices. For dynamic
   choices, describe their source and filtering rules rather than listing transient data.
-- Edit forms include current-value prefills. API/library/CLI actions document real argument names,
+- Edit forms include current-value prefills. API/library/CLI operations document real argument names,
   required values, omission/null defaults, flag/prompt behavior and limits. Verify what callbacks
   receive before assigning host policy to them.
 - Move repeated or lengthy field lists, technical schemas and protocol details to one cohesive
   repository guide/reference with a direct section link. Keep relevant controls, outcomes and
-  action-specific differences clear locally; do not make readers chase several links for a form.
+  operation-specific differences clear locally; do not make readers chase several links for a form.
 - Keep acceptance criteria concise and observable. Avoid detailed test scripts and exhaustive
   backend guarantees; keep those in tests and the authoritative decision record.
 - Keep identifiers and filenames stable. Add the next unused identifier within the area. Retain
@@ -121,7 +121,7 @@ cancellation or failure results when they affect the action. Keep both diagrams 
 - Use the availability definitions below. Explain unavailable entries and identify historical or
   intended controls clearly. Retention does not promise restoration or authorize new functionality.
   State opt-in capabilities and required hooks; trace account-state and permission requirements
-  for this operation instead of copying them from a neighboring action.
+  for this operation instead of copying them from a neighboring operation.
 - An optional **Coverage:** test link identifies supporting tests; it does not claim they were run.
   Keep runtime results separate from source-reviewed availability.
 - Verify source rather than inheriting stale copy. Update the index (README.md), coverage matrix
@@ -150,9 +150,9 @@ semantics and explain their mapping where an established scheme differs.
 ## Diagram conventions
 
 - Every story has User flow and Code flow sections, each containing a Mermaid flowchart. The first
-  uses screens, actions, decisions and outcomes a person understands; the second names the actual
+  uses screens, operations, decisions and outcomes a person understands; the second names the actual
   implementation. Link supporting files under Code references.
-- Keep diagrams focused on the action. Include meaningful choices, cancellation, refusal, failure
+- Keep diagrams focused on the operation. Include meaningful choices, cancellation, refusal, failure
   and recovery where they affect the journey; avoid repeating every validation or security rule.
   Use the owning handler/service/transaction as the default code-flow unit. Group routine field/proof
   validation into one boundary with one refusal path; field rules stay in criteria or a reference.
@@ -160,15 +160,15 @@ semantics and explain their mapping where an established scheme differs.
   Preserve material ordering without making a node for each field, message or helper.
 - Trace producers and consumers: entry, handler, state or service, persistence where applicable
   and resulting UI. A retained component or setter alone does not prove a reachable journey.
-- Distinguish server writes, device preferences and read-only actions. Verify the demo's actual
+- Distinguish server writes, device preferences and read-only operations. Verify the demo's actual
   path. Do not infer server authorization from hidden controls.
 - Trace each client and authentication strategy separately. Show actual response fields and
   prerequisite-token sources; browser rendering, API acknowledgements and audit events may differ.
   Keep real calls on the branches that execute them, including client-specific queries.
-- Place guards and validation before the operations they govern. Include early no-op returns,
+- Place checks and validation before the operations they govern. Include early no-op returns,
   scope/replacement effects and refusals that consume proof or leave committed state in place.
   Distinguish confirmation/completion recipients and attempted cleanup from guaranteed removal;
-  show recovery when these differences affect the action. Bounded counts describe the current run.
+  show recovery when these differences affect the operation. Bounded counts describe the current run.
 - Code labels must name existing symbols or explicitly identify absent/intended controls. State
   the scope when a diagram stops at a shared boundary.
 - For Hidden, Removed or Planned features, label the intended user flow as unavailable. Show the

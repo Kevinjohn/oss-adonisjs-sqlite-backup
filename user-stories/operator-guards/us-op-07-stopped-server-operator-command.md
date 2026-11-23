@@ -1,6 +1,6 @@
 # US-OP-07 — Run a stopped-server operator command
 
-As a host operator, I want to guard a custom Ace command with `operatorDatabasePath()` and `withOperatorDatabase()` so that it changes the SQLite database only after I confirm the server is stopped and the command holds an exclusive lock on the file.
+As a host operator, I want to check the operator preconditions of a custom Ace command with `operatorDatabasePath()` and `withOperatorDatabase()` so that it changes the SQLite database only after I confirm the server is stopped and the command holds an exclusive lock on the file.
 
 **Status:** Operator; current public exports for host-written commands. The package ships no command that uses them.
 **Access:** Host operator running a host-written command, with a Lucid primary connection that uses `better-sqlite3` with a pool of one.

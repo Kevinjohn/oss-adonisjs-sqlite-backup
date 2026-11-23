@@ -17,7 +17,7 @@ As a host operator, I want to create an immutable backup bundle from the configu
 - Verification uses package-opened SQLite connections. SQL functions, collations or extensions registered only on the application's connection are not registered on those handles. A schema that depends on them, such as an expression index using an application-registered function, may fail verification; create fails closed and does not publish the bundle. There is no connection initializer hook.
 - The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalized to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero. If cleanup fails, inspect the cleanup error and the archive before retrying. A bundle may remain visible if its READY marker could not be removed.
 - Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
-- `create` uses only configured backup directory; `--directory` is invalid for this action.
+- `create` uses only configured backup directory; `--directory` is invalid for this operation.
 
 - Create compares every ordered row of the source migration journal with the copy. A missing journal omits migration metadata. Unsupported metadata prevents publication. [Adoption scenarios](../../tests/adoption.spec.ts)
 
@@ -50,7 +50,7 @@ flowchart TD
 
 ## Code flow
 
-Scope: Ace create action through publication, failure cleanup and lock release. `assertDirectory`, `assertSafeLayout` and `acquireCreateLock` failures happen before the lock-owning `try/finally`, so a lock that was never acquired is not released.
+Scope: Ace create operation through publication, failure cleanup and lock release. `assertDirectory`, `assertSafeLayout` and `acquireCreateLock` failures happen before the lock-owning `try/finally`, so a lock that was never acquired is not released.
 
 ```mermaid
 flowchart TD

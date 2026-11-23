@@ -274,4 +274,4 @@ cleanup throw plain `Error`s, not `BackupException`, and carry no code:
 
 ## User story catalogue
 
-See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed action flows.
+See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed operation flows.

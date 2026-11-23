@@ -1,6 +1,6 @@
 # US-SETUP-01 — Configure and prepare backup operations
 
-As an application operator, I want to configure the Lucid connection, private backup directory and retention behavior so that manual, scheduled and restore-preparation actions use a known source and root.
+As an application operator, I want to configure the Lucid connection, private backup directory and retention behavior so that manual, scheduled and restore-preparation operations use a known source and root.
 
 **Status:** Operator; current configure and service setup path.
 **Access:** Application operator able to configure Lucid and manage local filesystem permissions.
@@ -53,7 +53,7 @@ flowchart TD
     B1 -->|Yes| C{"Which operation starts?"}
     C -->|checkSource| S["Resolve enabled source; open read-only, probe schema and close"]
     C -->|prepareDirectory| P["Create or tighten root to 0700"]
-    C -->|Recovery action| R["Use supplied directory or configured root; restore also resolves live path"]
+    C -->|Recovery operation| R["Use supplied directory or configured root; restore also resolves live path"]
     C -->|Service create or prune| D["Use configured root without preparing it"]
     D --> E{"Does the root already exist?"}
     E -->|No| F["Fail; direct service call does not recreate the root"]

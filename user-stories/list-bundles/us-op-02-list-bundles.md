@@ -11,9 +11,9 @@ As a host operator, I want to list READY bundles so that I can see available rec
 
 ## Acceptance criteria
 
-| Option        | Control     | Required/default/conditions                                                  |
-| ------------- | ----------- | ---------------------------------------------------------------------------- |
-| `--directory` | String flag | Optional; read-only override for this action; configured directory otherwise |
+| Option        | Control     | Required/default/conditions                                                     |
+| ------------- | ----------- | ------------------------------------------------------------------------------- |
+| `--directory` | String flag | Optional; read-only override for this operation; configured directory otherwise |
 
 - `listBundles()` includes only real bundle directories with READY, ordered oldest first; Ace prints bundle names.
 - An existing empty directory prints no bundle names; a missing directory fails. A concurrently removed publication is skipped; a READY bundle with unreadable manifest fails and identifies the bundle.
