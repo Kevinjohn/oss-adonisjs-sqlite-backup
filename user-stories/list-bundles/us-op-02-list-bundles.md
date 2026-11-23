@@ -43,12 +43,13 @@ flowchart TD
     A["DbBackup.run list case"] --> B["SqliteBackup.list(directory)"]
     B --> C["requireBackupDirectory chooses override or config"]
     C --> D["listBundles"]
-    D --> E["listBundleDirectoryNames filters and sorts real bundle dirs"]
+    D --> E["listBundleDirectoryNames checks root, then filters and sorts real bundle dirs"]
+    E -->|Missing or unreadable root| R["Propagate directory failure to Ace"]
     E --> F["READY marker filter"]
     F -->|READY absent| X["Skip entry"]
     F -->|READY present| G["readManifest validates marker, manifest and createdAt"]
     G -->|Success| H["Collect BundleSummary"]
-    G -->|Publication vanished| X
+    G -->|READY or previously present manifest vanished| X
     G -->|Other manifest failure| I["Throw E_BACKUP_INVALID"]
     H --> J["Return summaries; Ace logs names"]
     X --> J

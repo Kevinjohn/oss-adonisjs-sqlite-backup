@@ -2,19 +2,20 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`cecc545f7de44a325bee1a9160b2705556248fee`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/cecc545f7de44a325bee1a9160b2705556248fee). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Fetched `origin/main` baseline: [`aa163d9330939dd9af774efe55228a323dd45fc5`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/aa163d9330939dd9af774efe55228a323dd45fc5). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
 - **Application operator:** configures the Lucid SQLite connection, backup root, startup preparation and scheduler.
 - **Host operator:** runs create/list/verify/restore-prepare/prune and `db:upgrade`, and manages filesystem access. Runs host-written stopped-server commands built on `operatorDatabasePath` and `withOperatorDatabase`.
+- **Host developer:** invokes the service or standalone package API and owns the lifetime of any borrowed database handle.
 - **Application runtime:** owns the live SQLite file and any application cutover to a staged recovery copy.
 
 The package exposes commands and APIs, not a graphical application workflow. `restore-prepare` writes a verified copy to a new path and does not replace the live database or switch Lucid configuration. Stopping the application, selecting the staged file, restarting and validating are host decisions.
 
 ## Availability and evidence
 
-All listed operations are Operator journeys. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+**Operator** marks setup and host commands. **Public API** marks developer-owned integration through the service or standalone exports. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 
@@ -53,4 +54,4 @@ Implementation: [createBundle](../src/bundles.ts), [acquireLock](../src/lock.ts)
 
 ## Operator limits
 
-The [README limits](../README.md#limits) require a local filesystem for the SQLite lock and trusted parent directories for backup/restore paths. Linux is tested; Windows is unsupported because directory fsync is required. Copy work is synchronous and belongs in an operator task, not a web request. A plain filesystem SQLite path is required; in-memory and `file:` URI sources are refused. No runtime platform or recovery verification is claimed by this catalogue.
+The [README limits](../README.md#limits) require a local filesystem for the SQLite lock and trusted parent directories for backup/restore paths. Linux is tested; Windows is unsupported because directory fsync is required. `createBundle` awaits the native backup and performs synchronous file and integrity checks. Run it as operator work outside a web request. A plain filesystem SQLite path is required; in-memory and `file:` URI sources are refused. No runtime platform or recovery verification is claimed by this catalogue.
