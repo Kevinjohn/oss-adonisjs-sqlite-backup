@@ -59,6 +59,7 @@
       "configure.ts",
       "providers/**/*.ts",
       "commands/**/*.ts",
+      "services/**/*.ts",
       "src/**/*.ts"
     ],
     "check-coverage": true,
