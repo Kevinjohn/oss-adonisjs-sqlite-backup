@@ -46,7 +46,8 @@ export default class DbUpgrade extends BaseCommand {
         const directory = preMigrationBackupDirectory(dbPath, config?.directory)
         assertSafeLayout(resolveFilesystemPath(dbPath), resolveFilesystemPath(directory))
         prepareDirectory(directory)
-        // The same journal table and guards as db:backup, read from the connection being migrated.
+        // The same journal table, lock timeout and WAL requirement as db:backup, read from the
+        // connection being migrated.
         const bundle = await createBundle({
           livePath: dbPath,
           directory,

@@ -163,7 +163,7 @@ test.group('db:upgrade', (group) => {
     assert.equal(preMigrationBackupDirectory(database), `${realpathSync.native(database)}.backups`)
   })
 
-  test('migrates an empty database without a snapshot', async ({ assert }) => {
+  test('migrates an empty database without a pre-migration backup bundle', async ({ assert }) => {
     writeMigration(
       root,
       '001_heroes',
@@ -178,7 +178,7 @@ test.group('db:upgrade', (group) => {
     assert.isFalse(existsSync(join(root, 'backups')))
   })
 
-  test('snapshots an existing database under the configured directory before migrating', async ({
+  test('backs up an existing database under the configured directory before migrating', async ({
     assert,
   }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
@@ -199,7 +199,9 @@ test.group('db:upgrade', (group) => {
     assert.deepEqual(tables(join(bundle.path, 'db.sqlite')), ['villains'])
   })
 
-  test('records the configured migrations table in the snapshot', async ({ assert }) => {
+  test('records the configured migrations table in the pre-migration backup bundle', async ({
+    assert,
+  }) => {
     writeMigration(
       root,
       '001_heroes',
@@ -210,7 +212,7 @@ test.group('db:upgrade', (group) => {
       migrationsTable: 'schema_versions',
     })
     app = booted.app
-    // The first run migrates an empty database, so it creates the journal without a snapshot.
+    // The first run migrates an empty database, so it creates the journal without a backup bundle.
     const first = await booted.upgrade()
     first.assertSucceeded()
     writeMigration(root, '002_teams', "this.schema.createTable('teams', (t) => t.increments('id'))")
@@ -224,7 +226,7 @@ test.group('db:upgrade', (group) => {
     })
   })
 
-  test('refuses to snapshot a rollback-journal database when requireWal is set', async ({
+  test('refuses to back up a rollback-journal database when requireWal is set', async ({
     assert,
   }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
@@ -274,7 +276,7 @@ test.group('db:upgrade', (group) => {
     assert.notInclude(tables(booted.live), 'heroes')
   }).timeout(20_000)
 
-  test('snapshots beside the database when backups are not configured', async ({ assert }) => {
+  test('backs up beside the database when backups are not configured', async ({ assert }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
     writeMigration(
       root,
@@ -291,7 +293,7 @@ test.group('db:upgrade', (group) => {
     )
   })
 
-  test('skips the snapshot for an in-memory database', async ({ assert }) => {
+  test('skips the pre-migration backup bundle for an in-memory database', async ({ assert }) => {
     writeMigration(
       root,
       '001_heroes',
@@ -307,7 +309,9 @@ test.group('db:upgrade', (group) => {
     assert.isTrue(await db.connection().schema.hasTable('heroes'))
   })
 
-  test('does not migrate when the snapshot cannot be written', async ({ assert }) => {
+  test('does not migrate when the pre-migration backup bundle cannot be written', async ({
+    assert,
+  }) => {
     openDatabase(join(root, 'live.db')).exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
     writeMigration(
       root,
@@ -363,7 +367,7 @@ test.group('db:upgrade', (group) => {
     }
   })
 
-  test('keeps a usable pre-upgrade snapshot when a migration fails', async ({ assert }) => {
+  test('keeps a usable pre-migration backup bundle when a migration fails', async ({ assert }) => {
     const seed = openDatabase(join(root, 'live.db'))
     try {
       seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY, name TEXT)')
@@ -423,7 +427,7 @@ test.group('db:upgrade', (group) => {
     assert.isFalse(existsSync(booted.live))
   })
 
-  test('refuses an invalid configured filename before snapshotting or migrating', async ({
+  test('refuses an invalid configured filename before backing up or migrating', async ({
     assert,
   }) => {
     const seed = openDatabase(join(root, 'live.db'))

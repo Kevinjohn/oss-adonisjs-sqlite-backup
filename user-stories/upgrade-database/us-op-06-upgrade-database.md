@@ -31,7 +31,7 @@ flowchart TD
     B -->|Yes| D{"Database has tables and is on disk?"}
     D -->|No| G["Run pending migrations without a backup bundle"]
     D -->|Yes| E["Write verified backup bundle to pre-migration or database.backups"]
-    E --> F{"Snapshot written?"}
+    E --> F{"Backup bundle written?"}
     F -->|No| C
     F -->|Yes| G
     G --> H{"Migrations succeed?"}

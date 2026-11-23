@@ -290,6 +290,49 @@ test.group('provider', () => {
       cleanup()
     }
   })
+  test('README startup example: disabled skips, enabled prepares, a bad source still throws', async ({
+    assert,
+  }) => {
+    const startup = (backup: SqliteBackup) => {
+      if (!backup.config.directory) return false
+      backup.checkSource()
+      backup.prepareDirectory()
+      return true
+    }
+    const disabled = createTemporaryRoot()
+    const enabled = createTemporaryRoot()
+    const off = await bootApp(disabled.root, { withBackupConfig: 'disabled' })
+    const on = await bootApp(enabled.root)
+    try {
+      const archive = join(disabled.root, 'archive')
+      prepareDirectory(archive)
+      const offService = await off.app.container.make('sqlite.backup')
+      assert.isFalse(startup(offService))
+      assert.deepEqual(offService.list(archive), [])
+
+      const onService = await on.app.container.make('sqlite.backup')
+      writeFileSync(on.live, 'not a database')
+      assert.throws(() => startup(onService), /cannot be read/)
+      assert.isFalse(existsSync(join(enabled.root, 'backups')))
+      writeFileSync(on.live, '')
+      const seeded = openDatabase(on.live)
+      seeded.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
+      seeded.close()
+      assert.isTrue(startup(onService))
+      assert.equal(statSync(join(enabled.root, 'backups')).mode & 0o777, 0o700)
+      const created = await onService.create()
+      await onService.prune()
+      assert.deepEqual(
+        onService.list().map((bundle) => bundle.name),
+        [created.name]
+      )
+    } finally {
+      await off.app.terminate()
+      await on.app.terminate()
+      disabled.cleanup()
+      enabled.cleanup()
+    }
+  }).timeout(30_000)
   test('without config/backup.ts the binding fails with a fix-it message', async ({ assert }) => {
     const { root, cleanup } = createTemporaryRoot()
     const { app } = await bootApp(root, { withBackupConfig: false })
@@ -311,7 +354,7 @@ test.group('WAL: backup in its own process while the app writes', (group) => {
     return () => cleanup()
   })
 
-  test('writers stay fast and the bundle is one consistent snapshot', async ({ assert }) => {
+  test('writers stay fast and the bundle holds one SQLite read snapshot', async ({ assert }) => {
     // Seed ~80 MB so the copy takes long enough to overlap many writes.
     const seed = openDatabase(join(root, 'live.db'))
     seed.pragma('journal_mode = WAL')
