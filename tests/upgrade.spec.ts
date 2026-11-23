@@ -25,6 +25,7 @@ import { defineConfig } from '../src/define_config.js'
 import type { BackupConfigInput } from '../src/types.js'
 import { openDatabase } from '../src/native.js'
 import { preMigrationBackupDirectory } from '../index.js'
+import DbUpgrade from '../commands/db_upgrade.js'
 import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 // Migration files live in a temporary directory, so they import Lucid by absolute URL.
@@ -129,6 +130,14 @@ test.group('db:upgrade', (group) => {
       app = undefined
       temp.cleanup()
     }
+  })
+
+  test('describes the schema-generate flag as it behaves', ({ assert }) => {
+    const flag = DbUpgrade.flags.find((candidate) => candidate.name === 'schemaGenerate')
+    assert.equal(
+      flag?.description,
+      'Generate schema classes with schema:generate after a successful migration, never in production'
+    )
   })
 
   test('preMigrationBackupDirectory prefers the configured directory', ({ assert }) => {

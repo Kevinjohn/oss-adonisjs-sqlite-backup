@@ -14,7 +14,8 @@ export default class DbUpgrade extends BaseCommand {
   static options: CommandOptions = { startApp: true }
 
   @flags.boolean({
-    description: 'Let migration:run generate schema classes afterwards',
+    description:
+      'Generate schema classes with schema:generate after a successful migration, never in production',
     default: true,
     showNegatedVariantInHelp: true,
   })
