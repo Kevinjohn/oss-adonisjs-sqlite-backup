@@ -16,6 +16,7 @@ on:
       - 'src/**'
       - 'providers/**'
       - 'commands/**'
+      - 'services/**'
       - 'stubs/**'
       - 'tests/**'
       - bin/test.ts

@@ -5,7 +5,7 @@ As a host operator, I want to retain only the newest configured number of READY 
 **Status:** Operator; current Ace and public service operation.
 **Access:** Operator with write access to the private configured backup root.
 **Entry:** `node ace db:backup prune [--keep n]`.
-**Documentation:** [Command behavior](../../README.md#commands), [startup scheduling](../../README.md#service-and-configuration).
+**Documentation:** [Command behaviour](../../README.md#commands), [startup scheduling](../../README.md#service-and-configuration).
 **Source:** [DbBackup.run](../../commands/db_backup.ts), [SqliteBackup.prune](../../src/sqlite_backup.ts), [pruneBundles](../../src/prune.ts).
 **Coverage:** [Prune tests](../../tests/prune.spec.ts), [lock tests](../../tests/lock.spec.ts).
 

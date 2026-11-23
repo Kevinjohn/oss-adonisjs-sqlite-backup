@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `node ace db:upgrade --help` now describes `--schema-generate` as it behaves: schema classes are
+  generated with `schema:generate` after a successful migration, never in production. The flag
+  name, default and behaviour are unchanged.
+- Correction to 0.4.0: its entry described a documentation-only release, but 0.4.0 also shipped
+  these runtime and public-surface changes.
+  - Behaviour change: `db:backup verify` and `restore-prepare` fail with `E_BACKUP_INVALID` when a
+    bundle's `READY`, `manifest.json` or `db.sqlite` is not a regular file, for example a symbolic
+    link; `db:backup list` does the same for `READY` and `manifest.json`.
+  - Behaviour change: `defineConfig` throws `E_BACKUP_SOURCE` for a malformed `connection` or
+    `requireWal` and `E_BACKUP_UNSAFE` for a malformed `directory`. The provider runs
+    `defineConfig` again on the host configuration when it builds the service.
+  - New export `@kevinjohn/adonisjs-sqlite-backup/services/main`, the booted application's
+    `sqlite.backup` singleton.
+  - `./types` re-exports `BackupErrorCode`, `DirectoryLock` and `NativeDatabase`, and the build
+    output is unbundled, one module per source file.
+
 ## 0.4.1 - 2026-11-22
 
 - Refuse to prepare a backup directory containing the configured live database before changing

@@ -27,24 +27,28 @@ export function requireFormattedBundleName(ms: number): string {
   return formatBundleName(ms)
 }
 
-/** The timestamp of a name. Rejects names whose date is not real (month 13, day 32, ...). */
-export function requireBundleTimestamp(name: string): number {
+/** The timestamp of a name, or undefined when the date is not real (month 13, day 32, ...). */
+function readBundleTimestamp(name: string): number | undefined {
   const nameMatch = BUNDLE_RE.exec(name)
   const [, year, month, day, hour, minute, second, milliseconds] = (nameMatch ?? []).map(Number)
   const stamp = nameMatch
     ? Date.UTC(year!, month! - 1, day!, hour!, minute!, second!, milliseconds!)
     : Number.NaN
   if (!(stamp >= MIN_STAMP && stamp <= MAX_STAMP) || formatBundleName(stamp) !== name) {
+    return undefined
+  }
+  return stamp
+}
+
+/** The timestamp of a name. Rejects names whose date is not real (month 13, day 32, ...). */
+export function requireBundleTimestamp(name: string): number {
+  const stamp = readBundleTimestamp(name)
+  if (stamp === undefined) {
     throw new BackupException('E_BACKUP_UNSAFE', `"${name}" is not a bundle name`)
   }
   return stamp
 }
 
 export function isBundleName(name: string): boolean {
-  try {
-    requireBundleTimestamp(name)
-    return true
-  } catch {
-    return false
-  }
+  return readBundleTimestamp(name) !== undefined
 }

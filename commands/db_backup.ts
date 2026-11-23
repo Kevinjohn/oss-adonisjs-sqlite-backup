@@ -7,7 +7,10 @@ import type { PruneProgress, PruneResult } from '../src/types.js'
 
 const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
-/** The actions each flag applies to; a flag given with any other action is refused, not ignored. */
+/**
+ * The operations each flag applies to; a flag given with any other operation is refused, not
+ * ignored.
+ */
 const FLAG_ACTIONS = {
   bundle: ['verify', 'restore-prepare'],
   target: ['restore-prepare'],

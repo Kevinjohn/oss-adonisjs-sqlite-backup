@@ -60,9 +60,14 @@ The directory lock timeout (`lockTimeoutMs`) defaults to 0 and accepts integer m
 0 through 2,147,483,647. Prune reports `E_BACKUP_LOCKED` immediately if a backup lock on the
 same event loop is already held. It can wait up to the timeout for a lock held in another process.
 
-At application startup, call `backup.checkSource()` and `backup.prepareDirectory()` once before
-scheduling `backup.create()` followed by `backup.prune()`. Preparation creates missing directories
-and tightens an existing directory to mode `0700`; an existing non-directory root is refused. The
+When configured backups are enabled, call `backup.checkSource()` and `backup.prepareDirectory()`
+once at application startup before scheduling `backup.create()` followed by `backup.prune()`.
+When they are disabled, those calls throw `E_BACKUP_DISABLED`, so the startup example below checks
+the resolved `backup.config.directory` first. `backup.prepareDirectory()` refuses a root that
+contains the configured live SQLite database with `E_BACKUP_UNSAFE`, before creating or changing
+anything. Otherwise preparation creates missing directories and tightens an existing directory to
+mode `0700`; an existing non-directory root is refused. The standalone `prepareDirectory(path)`
+has no live database to compare and does not make that check. The
 manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
@@ -77,17 +82,27 @@ container binding from the service entry point:
 ```ts
 import backup from '@kevinjohn/adonisjs-sqlite-backup/services/main'
 
-backup.checkSource()
-backup.prepareDirectory()
+// An empty or omitted directory disables configured backups: skip startup work, not errors.
+if (backup.config.directory) {
+  backup.checkSource()
+  backup.prepareDirectory()
+  // Schedule backup.create() followed by backup.prune() here.
+}
 ```
 
+With backups disabled, the application still boots and `list`, `verify` and `prepareRestore`
+read a recovery directory passed explicitly. With backups enabled, an unreadable source or an
+unsafe root still throws from `checkSource()` or `prepareDirectory()` and stops startup.
 Do not run those calls before the application has booted. The root entry point and standalone
 utilities do not require a booted AdonisJS application. `defineConfig` checks that a supplied
 `connection` is a non-blank string, `directory` is a string (empty disables configured operations),
-and `requireWal` is boolean. Incorrect source settings produce `E_BACKUP_SOURCE`; incorrect
-directory settings produce `E_BACKUP_UNSAFE`.
+and `requireWal` is boolean. Incorrect source settings (`connection`, `requireWal`) produce
+`E_BACKUP_SOURCE`; incorrect `directory`, `keep` and `lockTimeoutMs` settings produce
+`E_BACKUP_UNSAFE`. Configuration errors are a `BackupException` by design, a departure from the
+usual AdonisJS practice of throwing a framework exception from `defineConfig`: one error type and
+code set covers configuration and backup failures alike.
 
-Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
+Configured preparation and prune refuse a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
@@ -121,7 +136,7 @@ keep their manifests free of this field.
 Verification uses package-opened SQLite connections. Functions, collations or extensions
 registered only on the application's connection are not available to those connections. A schema
 that depends on them may fail verification when the missing feature is exercised; in that case the
-package refuses to publish the bundle. The package has no initializer hook for registering
+package refuses to publish the bundle. The package has no initialiser hook for registering
 connection-local SQL features on its verification connections.
 
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
@@ -211,15 +226,34 @@ refuses an existing target. The bundle remains the recovery source.
 
 ## Errors
 
-Expected failures are a `BackupException` with one of six codes: `E_BACKUP_LOCKED`,
-`E_BACKUP_SOURCE`, `E_BACKUP_INVALID`, `E_BACKUP_UNSAFE`, `E_BACKUP_NOT_FOUND`,
-`E_BACKUP_DISABLED`. Unexpected
-system errors (permissions, a full disk) are passed through unchanged.
+Expected backup failures (create, list, verify, restore preparation, prune and the directory
+lock) are a `BackupException` with one of six codes: `E_BACKUP_LOCKED`, `E_BACKUP_SOURCE`,
+`E_BACKUP_INVALID`, `E_BACKUP_UNSAFE`, `E_BACKUP_NOT_FOUND`, `E_BACKUP_DISABLED`.
+`E_BACKUP_LOCKED` covers a lock held by another process or by an earlier operation on the same
+event loop; `E_BACKUP_NOT_FOUND` covers a missing backup root as well as a missing bundle.
+`E_BACKUP_UNSAFE` names a refused layout or path; it does not by itself mean that no write was
+attempted. `E_BACKUP_SOURCE` and `E_BACKUP_UNSAFE` also report invalid configuration, as described
+under Service and configuration. Unexpected system errors (permissions, a full disk) are passed
+through unchanged.
 
 If create fails and removing its unfinished bundle also fails, the original `Error` is rethrown
 with the cleanup failure on its `cleanupError` property. The command prints the original failure
 and a separate cleanup-failure line, then exits 1. An unfinished bundle is never a recovery point;
-a later successful prune removes it.
+a later successful prune removes it. Restore preparation attaches `cleanupError` in the same way
+when it cannot remove the staged file it created.
+
+The stopped-server operator helpers have a separate contract. Their operator preconditions and
+cleanup throw plain `Error`s, not `BackupException`, and carry no code:
+
+- `operatorDatabasePath` throws an `Error` when confirmation is missing, the primary connection is
+  not a single-connection `better-sqlite3` pool, or the database is not an existing file.
+- `withOperatorDatabase` throws an `Error` for an overlapping call on the same `Database`. When
+  the exclusive lock meets `SQLITE_BUSY`, it throws
+  `Another process holds this database; stop the server and retry` with the native error as
+  `cause`; other lock setup errors pass through unchanged.
+- A single failure, from the lock, the work or cleanup, is thrown unchanged. When more than one
+  occurs, an `AggregateError` (`Operator database cleanup failed`) lists the lock or work failure
+  first, then cleanup failures in the order they were observed.
 
 ## Limits
 
@@ -248,4 +282,4 @@ a later successful prune removes it.
 
 ## User story catalogue
 
-See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed action flows.
+See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed operation flows.

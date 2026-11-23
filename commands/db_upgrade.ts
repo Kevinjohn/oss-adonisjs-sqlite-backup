@@ -14,7 +14,8 @@ export default class DbUpgrade extends BaseCommand {
   static options: CommandOptions = { startApp: true }
 
   @flags.boolean({
-    description: 'Let migration:run generate schema classes afterwards',
+    description:
+      'Generate schema classes with schema:generate after a successful migration, never in production',
     default: true,
     showNegatedVariantInHelp: true,
   })
@@ -45,7 +46,8 @@ export default class DbUpgrade extends BaseCommand {
         const directory = preMigrationBackupDirectory(dbPath, config?.directory)
         assertSafeLayout(resolveFilesystemPath(dbPath), resolveFilesystemPath(directory))
         prepareDirectory(directory)
-        // The same journal table and guards as db:backup, read from the connection being migrated.
+        // The same journal table, lock timeout and WAL requirement as db:backup, read from the
+        // connection being migrated.
         const bundle = await createBundle({
           livePath: dbPath,
           directory,

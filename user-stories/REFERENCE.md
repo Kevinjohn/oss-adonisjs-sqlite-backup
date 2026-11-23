@@ -2,7 +2,7 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`26b305a36908998114179409a57ead8acfac20b0`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/26b305a36908998114179409a57ead8acfac20b0). Inventory covers Ace actions/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Fetched `origin/main` baseline: [`cecc545f7de44a325bee1a9160b2705556248fee`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/cecc545f7de44a325bee1a9160b2705556248fee). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
@@ -14,20 +14,20 @@ The package exposes commands and APIs, not a graphical application workflow. `re
 
 ## Availability and evidence
 
-All listed actions are Operator journeys. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+All listed operations are Operator journeys. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 
-| Capability            | Ace/service entry                                                                        | Implementation and contract                                                           |
-| --------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Configure and prepare | [configure](../configure.ts), [provider](../providers/sqlite_backup_provider.ts)         | [defineConfig](../src/define_config.ts), [directory](../src/directory.ts)             |
-| Create                | [DbBackup.run](../commands/db_backup.ts), [SqliteBackup.create](../src/sqlite_backup.ts) | [createBundle](../src/bundles.ts), [checks](../src/checks.ts), [lock](../src/lock.ts) |
-| List                  | [DbBackup.run](../commands/db_backup.ts), [SqliteBackup.list](../src/sqlite_backup.ts)   | [listBundles](../src/bundles.ts)                                                      |
-| Verify                | [SqliteBackup.verify](../src/sqlite_backup.ts)                                           | [verifyBundle and manifest checks](../src/bundles.ts)                                 |
-| Prepare restore       | [SqliteBackup.prepareRestore](../src/sqlite_backup.ts)                                   | [prepareRestore](../src/restore.ts), [path resolution](../src/paths.ts)               |
-| Upgrade               | [DbUpgrade.run](../commands/db_upgrade.ts), [command loader](../commands/main.ts)        | [preMigrationBackupDirectory](../src/upgrade.ts), [createBundle](../src/bundles.ts)   |
-| Stopped-server guards | [package index](../index.ts)                                                             | [operatorDatabasePath, withOperatorDatabase](../src/operator.ts)                      |
-| Prune                 | [SqliteBackup.prune](../src/sqlite_backup.ts)                                            | [pruneBundles](../src/prune.ts)                                                       |
+| Capability             | Ace/service entry                                                                        | Implementation and contract                                                           |
+| ---------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Configure and prepare  | [configure](../configure.ts), [provider](../providers/sqlite_backup_provider.ts)         | [defineConfig](../src/define_config.ts), [directory](../src/directory.ts)             |
+| Create                 | [DbBackup.run](../commands/db_backup.ts), [SqliteBackup.create](../src/sqlite_backup.ts) | [createBundle](../src/bundles.ts), [checks](../src/checks.ts), [lock](../src/lock.ts) |
+| List                   | [DbBackup.run](../commands/db_backup.ts), [SqliteBackup.list](../src/sqlite_backup.ts)   | [listBundles](../src/bundles.ts)                                                      |
+| Verify                 | [SqliteBackup.verify](../src/sqlite_backup.ts)                                           | [verifyBundle and manifest checks](../src/bundles.ts)                                 |
+| Prepare restore        | [SqliteBackup.prepareRestore](../src/sqlite_backup.ts)                                   | [prepareRestore](../src/restore.ts), [path resolution](../src/paths.ts)               |
+| Upgrade                | [DbUpgrade.run](../commands/db_upgrade.ts), [command loader](../commands/main.ts)        | [preMigrationBackupDirectory](../src/upgrade.ts), [createBundle](../src/bundles.ts)   |
+| Operator preconditions | [package index](../index.ts)                                                             | [operatorDatabasePath, withOperatorDatabase](../src/operator.ts)                      |
+| Prune                  | [SqliteBackup.prune](../src/sqlite_backup.ts)                                            | [pruneBundles](../src/prune.ts)                                                       |
 
 Standalone exports are in [the package index](../index.ts). The [README](../README.md) is the user-facing contract for limitations, error codes and the fact that restore is preparation only.
 
