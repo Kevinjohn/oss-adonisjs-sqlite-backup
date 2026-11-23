@@ -2,11 +2,13 @@ import { prepared } from './helpers.js'
 import { test } from '@japa/runner'
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
   statSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
@@ -75,6 +77,31 @@ test.group('verify and prepareRestore', (group) => {
       assert.isFalse(existsSync(target))
       rmSync(file, { recursive: true })
       writeFileSync(file, bytes)
+    }
+    assert.equal(verifyBundle(directory, name).name, name)
+  })
+
+  test('published members must not be symbolic links, even to identical files', ({ assert }) => {
+    for (const member of ['READY', 'manifest.json', 'db.sqlite']) {
+      const file = join(path, member)
+      const copy = join(root, `outside-${member}`)
+      copyFileSync(file, copy)
+      unlinkSync(file)
+      symlinkSync(copy, file)
+      assert.equal(
+        readBackupErrorCode(() => verifyBundle(directory, name)),
+        'E_BACKUP_INVALID',
+        `verify ${member}`
+      )
+      const target = join(root, 'staged.db')
+      assert.equal(
+        readBackupErrorCode(() => prepareRestore({ directory, livePath: live, target })),
+        'E_BACKUP_INVALID',
+        `prepareRestore ${member}`
+      )
+      assert.isFalse(existsSync(target))
+      unlinkSync(file)
+      copyFileSync(copy, file)
     }
     assert.equal(verifyBundle(directory, name).name, name)
   })
