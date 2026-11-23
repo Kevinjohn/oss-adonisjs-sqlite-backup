@@ -3,7 +3,7 @@
 As a host operator, I want the `db:upgrade` Ace command to create a verified pre-migration backup bundle of the SQLite database before running pending migrations so that a failed or unwanted migration has a recovery point.
 
 **Status:** Operator; current Ace command.
-**Access:** Host operator with a readable live database, a writable backup directory and Lucid registered with a `better-sqlite3` primary connection, and `@adonisjs/lucid/commands` registered because `db:upgrade` runs `migration:run` through the Ace kernel.
+**Access:** Host operator with access to the Lucid `better-sqlite3` primary connection and the `@adonisjs/lucid/commands` loader. For a file-backed database with tables, the operator also needs a writable pre-migration backup location.
 **Entry:** `node ace db:upgrade [--no-schema-generate]`; run as an operator task, not in a web request.
 **Documentation:** [Upgrading a database](../../README.md#upgrading-a-database).
 **Release note:** Since v0.3.0, the pre-migration backup bundle uses the primary connection's migrations table and the backup configuration's `lockTimeoutMs` and `requireWal`, and reports non-WAL warnings.
@@ -42,7 +42,7 @@ flowchart TD
 
 ## Code flow
 
-Scope: `DbUpgrade.run` through the `migration:run` exit code.
+Scope: `DbUpgrade.run` through migration and optional schema generation. The [create story](../create-bundle/us-op-01-create-bundle.md#code-flow) traces the shared bundle publication and cleanup.
 
 ```mermaid
 flowchart TD
@@ -61,7 +61,7 @@ flowchart TD
     G -->|success| H
     H -->|Throws| X
     H -->|Returns| I{"migrate.exitCode is 0?"}
-    I -->|No| J["Copy migrate.error and exit code"]
+    I -->|No| J["Copy migrate.error and exit code, defaulting to 1"]
     I -->|Yes| K{"Generation enabled outside production?"}
     K -->|No| L["Finish successfully"]
     K -->|Yes| M["Run schema:generate for primary connection"]

@@ -2,7 +2,7 @@
 
 Operator journeys for configuring the SQLite source and private backup root, creating and inspecting bundles, staging a restore copy, pruning retained data, backing up before migrations, and checking operator preconditions for stopped-server commands.
 
-Source baseline: [`cecc545`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/cecc545f7de44a325bee1a9160b2705556248fee) on `origin/main`.
+Source baseline: [`aa163d9`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/aa163d9330939dd9af774efe55228a323dd45fc5) (0.4.2 on `origin/main`).
 
 The README and source define available operations. “Operator” describes where the operation runs; it is not evidence of runtime verification.
 

@@ -2,15 +2,19 @@
 
 As an application developer, I want to create a bundle from an existing SQLite handle or a configured file so that a host-run job can publish a recovery point and retain control of its connection.
 
-**Entry:** Resolve the container singleton `sqlite.backup`, import the boot-aware `@kevinjohn/adonisjs-sqlite-backup/services/main`, or call the standalone functions exported by the package.
+**Status:** Public API.
+**Access:** Host developer with an existing private root and a readable file-backed SQLite source.
+**Entry:** Resolve the container singleton `sqlite.backup`, import the boot-aware `@kevinjohn/adonisjs-sqlite-backup/services/main`, or call the package export `createBundle`.
+**Documentation:** [Service and configuration](../../README.md#service-and-configuration).
+**Source:** [Service](../../src/sqlite_backup.ts), [standalone create](../../src/bundles.ts).
+**Coverage:** [Adoption scenarios](../../tests/adoption.spec.ts), [application tests](../../tests/app.spec.ts).
 
 ## Acceptance criteria
 
 - A host can call `checkSource()` to resolve and open its configured file read-only, probe the schema and close the probe without creating a bundle. The application chooses when to perform this check. `livePath()` resolves the selected connection on each call. Both require an enabled directory.
 - Prepare the private root with `backup.prepareDirectory()` or `prepareDirectory(directory)` before calling create directly. With no handle, the service opens the configured file. Standalone callers supply `livePath`. The package closes its own handle on success and failure.
 - With `backup.create({ database })` or standalone `createBundle({ directory, source: { database } })`, the main file comes from the supplied handle. An unreadable or memory-only handle, an active transaction or a source under the archive root is refused. The caller keeps the handle and its settings. Create reads the main migration journal even with temporary tables or BigInt-mode results.
-- Await the result to obtain the name, path, UTC creation time, manifest and warnings. A host can list published summaries or pass the returned name to verify or restore preparation. Recovery directory overrides take precedence even when the configured directory is enabled. Service restore preparation still needs a resolvable live path to check the target.
-- Service prune checks any resolvable live path against its root. When the service has only a borrowed source and Lucid supplies no usable path, prune can still run. Standalone prune accepts the root and retention count and has no Lucid source configuration.
+- Await the result to obtain the name, path, UTC creation time, manifest and warnings. The [create story](../create-bundle/us-op-01-create-bundle.md#code-flow) traces shared publication checks and cleanup. The returned name can select a bundle for [verification](../verify-bundle/us-op-03-verify-bundle.md) or [restore preparation](../prepare-restore/us-op-04-prepare-restore.md).
 
 ## User flow
 
@@ -30,18 +34,17 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["SqliteBackup.create or createBundle"] --> B["Resolve source and validate layout"]
-    B --> C["Acquire archive lock"]
-    C -->|Acquired| D["Open owned source or use borrowed handle"]
-    C -->|Refused| X["Throw without releasing an unacquired lock"]
-    D --> E["Copy, check and publish"]
-    E --> F["Attempt owned handle close and lock release"]
-    D -->|Source refusal| F
-    E -->|Failure| G["Attempt owned bundle cleanup"]
-    G --> F
-    F -->|Success and no prior failure| H["Return bundle result"]
-    F -->|Prior failure| I["Throw with any cleanup diagnostics"]
-    F -->|Cleanup failure only| J["Attempt to unpublish and remove bundle; throw"]
+    A["Host calls SqliteBackup.create or standalone createBundle"] -->|Service| B["Require configured root and select connection policy"]
+    A -->|Standalone| C{"Which source was supplied?"}
+    B --> C
+    C -->|Borrowed handle| D["createBundle uses requireBorrowedSourcePath"]
+    C -->|File| E["Service resolves livePath or caller supplies it; createBundle resolves it on disk"]
+    D --> F["createBundle checks private root and source layout and awaits acquireCreateLock"]
+    E --> F
+    F -->|Refused| X["Return the failure without attempting lock release"]
+    F -->|Acquired| G["Use borrowed handle or open owned source; join the shared publication and cleanup flow"]
+    G -->|Success| H["Return CreateResult to the host"]
+    G -->|Failure| I["Propagate the original error and any cleanup diagnostics"]
 ```
 
-**Source and coverage:** [Service](../../src/sqlite_backup.ts), [source lookup](../../src/source.ts), [create](../../src/bundles.ts), [adoption scenarios](../../tests/adoption.spec.ts), [application tests](../../tests/app.spec.ts), [create tests](../../tests/create.spec.ts).
+**Code references:** [Service](../../src/sqlite_backup.ts), [source lookup](../../src/source.ts), [create](../../src/bundles.ts).

@@ -20,10 +20,10 @@ As an application operator, I want to configure the Lucid connection, private ba
 | `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                                                                 |
 
 - Ace configure requires the host's `@adonisjs/assembler` for codemods, writes the config stub and registers the provider and the package command loader (`@kevinjohn/adonisjs-sqlite-backup/commands`), which provides `db:backup` and `db:upgrade`. Upgrade additionally needs Lucid's command registration. The provider binds `sqlite.backup` from backup and Lucid config; the boot-aware `@kevinjohn/adonisjs-sqlite-backup/services/main` import resolves the same singleton.
-- `defineConfig` validates `keep` and `lockTimeoutMs` and the types of `connection`, `directory` and `requireWal`; absent or empty directory disables configured service operations, while a read-only `--directory` override remains available to list/verify/restore-prepare.
+- `defineConfig` rejects invalid `connection` and `requireWal` with `E_BACKUP_SOURCE`, and invalid `directory`, `keep` and `lockTimeoutMs` with `E_BACKUP_UNSAFE`. An absent or empty directory disables configured service operations. List, verify and restore preparation still accept an explicit archive root.
 - At host startup, check the resolved `backup.config.directory` first. When it is empty, configured backups are disabled: the provider still boots, `checkSource()`, `prepareDirectory()`, `create()` and `prune()` would throw `E_BACKUP_DISABLED`, so the host skips them and schedules nothing, and recovery reads take an explicit directory. When it is set, `checkSource()` can fail fast without making a bundle; call `prepareDirectory()` once to create/tighten the root to `0700` before scheduling create then prune. `prepareDirectory()` refuses a root that contains the configured live database with `E_BACKUP_UNSAFE` before creating or changing anything. An unreadable source or unsafe root still throws and stops startup.
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
-- A caller using exported `acquireLock(directory, timeoutMs)` directly must provide an existing private directory on a local filesystem, with ancestors writable only by trusted users or sticky as described in the README limits. `acquireLock` itself does not check root privacy. Keep the returned lock referenced through `release()`. `.backup.lock` contains no application data. Damaged-lock repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
+- A caller using the [standalone archive lock](../integration/us-int-02-archive-lock.md) provides an existing private root. `acquireLock` itself does not check root privacy.
 
 - If the app resolves the singleton without a backup config, the provider raises `E_BACKUP_SOURCE` with the configure command. Missing config differs from a present config with an empty directory, for which archive overrides are available. [Provider](../../providers/sqlite_backup_provider.ts), [application tests](../../tests/app.spec.ts)
 
@@ -49,13 +49,17 @@ Scope: operator setup and backup-root behaviour in service and command entry poi
 flowchart TD
     A["configure(command) writes config and registers provider and command loader"] --> B["Provider registers lazy singleton"]
     B --> B1{"Backup config present and valid?"}
-    B1 -->|No| X["Throw missing config or validation error when resolved"]
-    B1 -->|Yes| C{"Which operation starts?"}
+    B1 -->|No| X["Throw E_BACKUP_SOURCE or E_BACKUP_UNSAFE"]
+    B1 -->|Yes| O{"Which group of operations?"}
+    O -->|List, verify or restore preparation| R["Use supplied directory or configured root; restore also resolves live path"]
+    R -->|Neither directory set| F0["Service throws E_BACKUP_DISABLED"]
+    O -->|Source check, directory prep, create or prune| D0{"Configured directory set?"}
+    D0 -->|No| F1["Host skips startup and scheduled work; a direct call throws E_BACKUP_DISABLED"]
+    D0 -->|Yes| C{"Which configured operation?"}
     C -->|checkSource| S["Resolve enabled source; open read-only, probe schema and close"]
     C -->|prepareDirectory| P1{"Root contains the configured live database?"}
     P1 -->|Yes| P2["Throw E_BACKUP_UNSAFE before creating or changing the root"]
     P1 -->|No| P["Create or tighten root to 0700"]
-    C -->|Recovery operation| R["Use supplied directory or configured root; restore also resolves live path"]
     C -->|Service create or prune| D["Use configured root without preparing it"]
     D --> E{"Does the root already exist?"}
     E -->|No| F["Fail; direct service call does not recreate the root"]

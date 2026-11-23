@@ -1,6 +1,6 @@
 # US-OP-01 — Create a verified backup bundle
 
-As a host operator, I want to create an immutable backup bundle from the configured Lucid SQLite database so that I have a checked recovery point.
+As a host operator, I want to create a verified backup bundle from the configured Lucid SQLite database so that I have a checked recovery point.
 
 **Status:** Operator; current Ace command and service operation.
 **Access:** Host operator with a readable live database and private configured backup root.
