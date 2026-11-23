@@ -136,7 +136,7 @@ keep their manifests free of this field.
 Verification uses package-opened SQLite connections. Functions, collations or extensions
 registered only on the application's connection are not available to those connections. A schema
 that depends on them may fail verification when the missing feature is exercised; in that case the
-package refuses to publish the bundle. The package has no initializer hook for registering
+package refuses to publish the bundle. The package has no initialiser hook for registering
 connection-local SQL features on its verification connections.
 
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.

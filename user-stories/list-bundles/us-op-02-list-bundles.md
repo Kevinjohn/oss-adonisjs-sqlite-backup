@@ -5,7 +5,7 @@ As a host operator, I want to list READY bundles so that I can see available rec
 **Status:** Operator; current Ace and public service operation.
 **Access:** Operator able to read configured or explicitly selected backup directory.
 **Entry:** `node ace db:backup list [--directory path]`.
-**Documentation:** [Command behavior](../../README.md#commands), [bundle listing contract](../../README.md#service-and-configuration).
+**Documentation:** [Command behaviour](../../README.md#commands), [bundle listing contract](../../README.md#service-and-configuration).
 **Source:** [DbBackup.run](../../commands/db_backup.ts), [SqliteBackup.list](../../src/sqlite_backup.ts), [listBundles](../../src/bundles.ts).
 **Coverage:** [Application command tests](../../tests/app.spec.ts), [bundle tests](../../tests/create.spec.ts).
 

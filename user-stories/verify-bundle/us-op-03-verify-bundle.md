@@ -5,7 +5,7 @@ As a host operator, I want to verify a named or newest backup bundle so that I c
 **Status:** Operator; current Ace and public service operation.
 **Access:** Operator able to read configured or explicitly selected backup directory.
 **Entry:** `node ace db:backup verify [--bundle name] [--directory path]`.
-**Documentation:** [Command behavior](../../README.md#commands), [bundle validation contract](../../README.md#errors).
+**Documentation:** [Command behaviour](../../README.md#commands), [bundle validation contract](../../README.md#errors).
 **Source:** [DbBackup.run](../../commands/db_backup.ts), [SqliteBackup.verify](../../src/sqlite_backup.ts), [verifyBundle](../../src/bundles.ts).
 **Coverage:** [Review tests](../../tests/review.spec.ts), [verify/restore tests](../../tests/verify_restore.spec.ts).
 

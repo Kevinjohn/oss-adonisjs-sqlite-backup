@@ -1,6 +1,6 @@
 # US-SETUP-01 — Configure and prepare backup operations
 
-As an application operator, I want to configure the Lucid connection, private backup directory and retention behavior so that manual, scheduled and restore-preparation operations use a known source and root.
+As an application operator, I want to configure the Lucid connection, private backup directory and retention behaviour so that manual, scheduled and restore-preparation operations use a known source and root.
 
 **Status:** Operator; current configure and service setup path.
 **Access:** Application operator able to configure Lucid and manage local filesystem permissions.
@@ -43,7 +43,7 @@ flowchart TD
 
 ## Code flow
 
-Scope: operator setup and backup-root behavior in service and command entry points; scheduling is host-owned.
+Scope: operator setup and backup-root behaviour in service and command entry points; scheduling is host-owned.
 
 ```mermaid
 flowchart TD
