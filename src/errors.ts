@@ -4,11 +4,17 @@ import { Exception } from '@adonisjs/core/exceptions'
 export type BackupErrorCode =
   /** The backup directory lock is held, by another process or this event loop. Retry later. */
   | 'E_BACKUP_LOCKED'
-  /** The source cannot be backed up (not SQLite, not a file, missing, or not WAL when required). */
+  /**
+   * The source cannot be backed up (not SQLite, not a file, missing, or not WAL when required),
+   * `config/backup.ts` is missing, or its `connection` or `requireWal` setting is invalid.
+   */
   | 'E_BACKUP_SOURCE'
   /** A bundle or copy failed verification (missing READY, checksum, integrity or FK check). */
   | 'E_BACKUP_INVALID'
-  /** The request would touch the live database, overwrite something, or use an unsafe path. */
+  /**
+   * The request would touch the live database, overwrite something, or use an unsafe path, or a
+   * `directory`, `keep` or `lockTimeoutMs` setting is invalid.
+   */
   | 'E_BACKUP_UNSAFE'
   /** No bundle with that name, no READY bundle at all, or the backup root is missing. */
   | 'E_BACKUP_NOT_FOUND'

@@ -93,8 +93,11 @@ unsafe root still throws from `checkSource()` or `prepareDirectory()` and stops 
 Do not run those calls before the application has booted. The root entry point and standalone
 utilities do not require a booted AdonisJS application. `defineConfig` checks that a supplied
 `connection` is a non-blank string, `directory` is a string (empty disables configured operations),
-and `requireWal` is boolean. Incorrect source settings produce `E_BACKUP_SOURCE`; incorrect
-directory settings produce `E_BACKUP_UNSAFE`.
+and `requireWal` is boolean. Incorrect source settings (`connection`, `requireWal`) produce
+`E_BACKUP_SOURCE`; incorrect `directory`, `keep` and `lockTimeoutMs` settings produce
+`E_BACKUP_UNSAFE`. Configuration errors are a `BackupException` by design, a departure from the
+usual AdonisJS practice of throwing a framework exception from `defineConfig`: one error type and
+code set covers configuration and backup failures alike.
 
 Configured prune refuses a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
@@ -226,7 +229,9 @@ lock) are a `BackupException` with one of six codes: `E_BACKUP_LOCKED`, `E_BACKU
 `E_BACKUP_LOCKED` covers a lock held by another process or by an earlier operation on the same
 event loop; `E_BACKUP_NOT_FOUND` covers a missing backup root as well as a missing bundle.
 `E_BACKUP_UNSAFE` names a refused layout or path; it does not by itself mean that no write was
-attempted. Unexpected system errors (permissions, a full disk) are passed through unchanged.
+attempted. `E_BACKUP_SOURCE` and `E_BACKUP_UNSAFE` also report invalid configuration, as described
+under Service and configuration. Unexpected system errors (permissions, a full disk) are passed
+through unchanged.
 
 If create fails and removing its unfinished bundle also fails, the original `Error` is rethrown
 with the cleanup failure on its `cleanupError` property. The command prints the original failure
