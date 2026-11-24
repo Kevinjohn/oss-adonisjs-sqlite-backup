@@ -433,7 +433,7 @@ export async function createBundle(
     const cleanupFailure = cleanupFailedBundle()
     const first = cleanupErrors[0]
     const failure =
-      cleanupErrors.length > 1 || (cleanupFailure && !(first instanceof Error))
+      cleanupErrors.length > 1 || cleanupFailure
         ? new E_BACKUP_CLEANUP(cleanupErrors, { cause: first })
         : first
     if (cleanupFailure && failure instanceof Error)

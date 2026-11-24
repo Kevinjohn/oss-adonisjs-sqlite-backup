@@ -418,7 +418,11 @@ test.group('createBundle', (group) => {
         const error = await createBundle({ livePath: live, directory }).catch(
           (caught: unknown) => caught
         )
-        assert.match(String(error), /native close failed/)
+        assert.instanceOf(error, errors.E_BACKUP_CLEANUP)
+        const failure = error as InstanceType<typeof errors.E_BACKUP_CLEANUP>
+        assert.lengthOf(failure.resourceCleanupErrors, 1)
+        assert.strictEqual(failure.cause, failure.resourceCleanupErrors[0])
+        assert.match(String(failure.cause), /native close failed/)
         assert.match(
           String((error as { cleanupError?: unknown }).cleanupError),
           /recursive cleanup refused/
