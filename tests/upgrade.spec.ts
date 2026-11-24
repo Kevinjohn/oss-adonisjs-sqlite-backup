@@ -7,7 +7,6 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
   realpathSync,
   statSync,
@@ -15,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { dirname, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
@@ -30,15 +29,6 @@ import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 // Migration files live in a temporary directory, so they import Lucid by absolute URL.
 const schemaModule = pathToFileURL(createRequire(import.meta.url).resolve('@adonisjs/lucid/schema'))
-
-// Lucid sets migration:run's `error` from 22.4.0; earlier releases only log it.
-const lucidEntry = createRequire(import.meta.url).resolve('@adonisjs/lucid')
-const lucidPackage = join(dirname(lucidEntry), '..', 'package.json')
-const { version: lucidVersion } = JSON.parse(readFileSync(lucidPackage, 'utf8')) as {
-  version: string
-}
-const lucidMinor = Number(lucidVersion.split('.')[1])
-const lucidReportsMigrationError = lucidMinor >= 4
 
 function writeMigration(root: string, name: string, body: string) {
   const directory = join(root, 'database', 'migrations')
@@ -174,8 +164,12 @@ test.group('db:upgrade', (group) => {
     const command = await booted.upgrade()
     command.assertSucceeded()
     assert.include(tables(booted.live), 'heroes')
+    assert.include(booted.logs(), '❯ migrated database/migrations/001_heroes')
     assert.notInclude(booted.logs(), 'Pre-upgrade backup written')
     assert.isFalse(existsSync(join(root, 'backups')))
+    const repeated = await booted.upgrade()
+    repeated.assertSucceeded()
+    assert.include(booted.logs(), 'Already up to date')
   })
 
   test('backs up an existing database under the configured directory before migrating', async ({
@@ -380,11 +374,7 @@ test.group('db:upgrade', (group) => {
     app = booted.app
     const command = await booted.upgrade()
     assert.isAbove(command.exitCode ?? 0, 0)
-    if (lucidReportsMigrationError) {
-      assert.include(command.error?.message, 'no such table: no_such_table')
-    } else {
-      assert.isUndefined(command.error)
-    }
+    assert.include(command.error?.message, 'no such table: no_such_table')
     const bundle = verifyBundle(`${booted.live}.backups`)
     assert.include(booted.logs(), `Pre-upgrade backup written ${bundle.path}`)
     const database = openDatabase(join(bundle.path, 'db.sqlite'), { readonly: true })
@@ -395,6 +385,36 @@ test.group('db:upgrade', (group) => {
     } finally {
       database.close()
     }
+  })
+
+  test('reports a failed migration as one error line without a stack trace', async ({ assert }) => {
+    writeMigration(
+      root,
+      '001_heroes',
+      "this.schema.createTable('heroes', (t) => t.increments('id'))"
+    )
+    writeMigration(root, '002_broken', "await this.db.rawQuery('SELECT * FROM no_such_table')")
+    const booted = await bootApp(root)
+    app = booted.app
+    const ace = await booted.app.container.make('ace')
+    // Ace renders a command's unhandled error, with its stack, through the kernel's handler.
+    const rendered: unknown[] = []
+    const render = ace.errorHandler.render.bind(ace.errorHandler)
+    ace.errorHandler.render = async (error, kernel) => {
+      rendered.push(error)
+      await render(error, kernel)
+    }
+    const command = await booted.upgrade()
+    assert.equal(command.exitCode, 1)
+    assert.include(command.error?.message, 'no such table: no_such_table')
+    assert.lengthOf(rendered, 0)
+    const errors = ace.ui.logger.getLogs().filter((log) => log.stream === 'stderr')
+    assert.lengthOf(errors, 1)
+    assert.include(errors[0]!.message, 'Upgrade failed: ')
+    assert.include(errors[0]!.message, 'no such table: no_such_table')
+    assert.notInclude(errors[0]!.message, '\n')
+    assert.include(booted.logs(), 'database/migrations/001_heroes')
+    assert.include(booted.logs(), 'database/migrations/002_broken')
   })
 
   test('refuses a connection that is not better-sqlite3', async ({ assert }) => {

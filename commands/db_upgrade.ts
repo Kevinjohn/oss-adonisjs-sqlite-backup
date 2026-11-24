@@ -1,5 +1,6 @@
 import { BaseCommand, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
+import { MigrationRunner } from '@adonisjs/lucid/migration'
 import { createBundle } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
 import { resolveFilesystemPath } from '../src/paths.js'
@@ -7,7 +8,10 @@ import { assertSafeLayout, normalizeConfiguredSqliteFilename } from '../src/sour
 import type { BackupConfig } from '../src/types.js'
 import { preMigrationBackupDirectory } from '../src/upgrade.js'
 
-/** `node ace db:upgrade`: a verified pre-migration backup bundle, then `migration:run`. */
+/**
+ * `node ace db:upgrade`: a verified pre-migration backup bundle, then the pending migrations. A
+ * failure is reported as one line; `error` and the exit code are left for a calling command.
+ */
 export default class DbUpgrade extends BaseCommand {
   static commandName = 'db:upgrade'
   static description = 'Back up the SQLite database, then run pending migrations'
@@ -58,14 +62,19 @@ export default class DbUpgrade extends BaseCommand {
         for (const warning of bundle.warnings) this.logger.warning(warning)
         this.logger.success(`Pre-upgrade backup written ${bundle.path}`)
       }
-      const migrate = await this.kernel.exec('migration:run', ['--force', '--no-schema-generate'])
-      if (migrate.exitCode !== 0) {
-        this.error = migrate.error
-        this.exitCode = migrate.exitCode ?? 1
+      // Lucid's migration runner, not `migration:run`: a nested command renders its own failure
+      // with the stack, and only that command's `completed()` could stop it.
+      const migrator = new MigrationRunner(db, this.app, { direction: 'up' })
+      migrator.on('migration:completed', (file) => this.logger.log(`❯ migrated ${file.file.name}`))
+      migrator.on('migration:error', (file) => this.logger.log(`❯ error ${file.file.name}`))
+      await migrator.run()
+      if (migrator.error) {
+        this.error = migrator.error
+        this.exitCode = 1
         return
       }
-      // Generated here, not by migration:run: Lucid 22.0 and 22.1 generate after a failed
-      // migration too, and the generator's exit code replaces the failure.
+      if (migrator.status === 'skipped') this.logger.log('Already up to date')
+      // Generated only after every migration succeeds.
       if (this.schemaGenerate && !this.app.inProduction) {
         const generate = await this.kernel.exec('schema:generate', [
           `--connection=${db.primaryConnectionName}`,
@@ -79,5 +88,12 @@ export default class DbUpgrade extends BaseCommand {
       this.logger.error(`Upgrade failed: ${String(error)}`)
       this.exitCode = 1
     }
+  }
+
+  /** Reports a failure kept in `error` as one line, so Ace does not render it with the stack. */
+  async completed() {
+    if (!this.error) return false
+    this.logger.error(`Upgrade failed: ${String(this.error)}`)
+    return true
   }
 }
