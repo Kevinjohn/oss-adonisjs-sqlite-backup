@@ -2,7 +2,7 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`aa163d9330939dd9af774efe55228a323dd45fc5`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/aa163d9330939dd9af774efe55228a323dd45fc5). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Source baseline: [`11ec984f197962155c9405adabf02b5f87439680`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/11ec984f197962155c9405adabf02b5f87439680). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
@@ -15,7 +15,7 @@ The package exposes commands and APIs, not a graphical application workflow. `re
 
 ## Availability and evidence
 
-**Operator** marks setup and host commands. **Public API** marks developer-owned integration through the service or standalone exports. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+**Operator** marks setup and host commands. **Public API** is this catalogue’s Current equivalent for developer-owned integration through the service or standalone exports. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 

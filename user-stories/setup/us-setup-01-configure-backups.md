@@ -36,7 +36,7 @@ flowchart TD
     C --> C1{"Resolved backup directory set?"}
     C1 -->|No| C2["Skip startup checks and scheduling; recover with an explicit directory"]
     C1 -->|Yes| D["At startup check source and prepare private root"]
-    D --> E{"Source readable and root outside the live database?"}
+    D --> E{"Source readable and live database outside the root?"}
     E -->|No| F["Fail setup or backup operation clearly"]
     E -->|Yes| G["Host schedules create followed by prune"]
 ```
@@ -49,7 +49,8 @@ Scope: operator setup and backup-root behaviour in service and command entry poi
 flowchart TD
     A["configure(command) writes config and registers provider and command loader"] --> B["Provider registers lazy singleton"]
     B --> B1{"Backup config present and valid?"}
-    B1 -->|No| X["Throw InvalidArgumentsException"]
+    B1 -->|Missing| X["Throw RuntimeException on singleton resolution"]
+    B1 -->|Invalid| X1["defineConfig throws InvalidArgumentsException"]
     B1 -->|Yes| O{"Which group of operations?"}
     O -->|List, verify or restore preparation| R["Use supplied directory or configured root; restore also resolves live path"]
     R -->|Neither directory set| F0["Service throws E_BACKUP_DISABLED"]

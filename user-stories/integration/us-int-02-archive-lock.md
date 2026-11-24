@@ -30,7 +30,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Validate timeout and lock path"] --> B["Acquire SQLite BEGIN EXCLUSIVE transaction"]
+    A["Host calls acquireLock; validate timeout and lock path"] --> B["Acquire SQLite BEGIN EXCLUSIVE transaction"]
     B -->|Busy| C["Raise E_BACKUP_LOCKED"]
     B -->|Damaged| G["Check singly linked regular file; truncate safely"]
     G -->|Safe| A
