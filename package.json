@@ -1,7 +1,7 @@
 {
   "name": "@kevinjohn/adonisjs-sqlite-backup",
   "description": "Verified SQLite backup bundles and prepare-only restore for AdonisJS 7 Lucid apps",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "engines": {
     "node": ">=24.0.0"
   },
