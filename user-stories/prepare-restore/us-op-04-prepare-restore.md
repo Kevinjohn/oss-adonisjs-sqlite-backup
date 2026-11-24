@@ -35,8 +35,10 @@ flowchart TD
     B -->|Yes| S{"Selected bundle and manifest readable?"}
     S -->|No| C
     S -->|Yes| D["Copy bundle to staged target"]
-    D -->|Copy fails| CF["Report error; inspect the chosen target for a partial file before retry"]
-    D --> E["Verify staged copy against manifest"]
+    D -->|Copy fails| CF["Report error; inspect the chosen target for a partial or unverified file before retry"]
+    D -->|Copy succeeds| ID["Capture staged identity and resolve target path"]
+    ID -->|Failure| CF
+    ID -->|Success| E["Verify staged copy against manifest"]
     E --> F{"Copy verifies?"}
     F -->|No| G["Report failure; attempt owned staged-file cleanup"]
     G --> J{"Cleanup failed?"}

@@ -47,7 +47,7 @@ operation fails, it attempts to remove a bundle directory only after this call c
 is best effort: the original failure is rethrown, with `cleanupError` attached when it is an
 `Error` and cleanup also fails. The Ace command reports the original error, reports an attached
 cleanup failure separately, and exits nonzero. A later `prune` removes unfinished bundles. Errors
-before lock acquisition have no acquired lock to release. Native close and lock-release failures can accompany the operation failure in `resourceCleanupErrors`. If native cleanup fails after publication, create attempts to unpublish and remove its own bundle before propagating the failure.
+before lock acquisition have no acquired lock to release. Native close and lock-release failures can accompany the operation failure in `resourceCleanupErrors`. Finalization attempts owned-source close and lock release before handling a resource-cleanup-only failure. That later failure can trigger unpublication and removal of the owned bundle after the archive lock was released; this cleanup does not reacquire the lock.
 
 Implementation: [createBundle](../src/bundles.ts), [acquireLock](../src/lock.ts) and
 [DbBackup.run](../commands/db_backup.ts).
