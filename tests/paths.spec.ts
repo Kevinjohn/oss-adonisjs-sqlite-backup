@@ -249,7 +249,7 @@ test.group('kernel-faithful paths', (group) => {
     }
     assert.equal(
       await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-      'E_BACKUP_CHECKSUM_MISMATCH'
+      'E_BACKUP_SIZE_MISMATCH'
     )
     assert.equal(readFileSync(target, 'utf8'), 'someone else')
   })
