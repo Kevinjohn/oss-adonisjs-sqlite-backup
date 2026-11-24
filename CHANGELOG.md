@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.3 - 2026-11-24
+
+- Document operator and live database path requirements, pre-migration destinations and the scope of scheduled retention.
+
 ## 0.4.2 - 2026-11-23
 
 - `node ace db:upgrade --help` now describes `--schema-generate` as it behaves: schema classes are
