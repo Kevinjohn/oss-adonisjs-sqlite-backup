@@ -18,6 +18,12 @@ function attachProgress(error: unknown, progress: PruneProgress): Error {
   return Object.defineProperty(failure, 'pruneProgress', { value: progress })
 }
 
+export function pruneKeepProblem(keep: number): string | undefined {
+  if (!Number.isInteger(keep) || keep < 1) {
+    return `keep must be an integer >= 1 (got ${keep})`
+  }
+}
+
 /**
  * Keep the newest `keep` READY bundles (newest = latest name; names only increase) and remove the
  * rest. Unfinished bundles (no READY) are removed too: create holds the lock for its whole run, so
@@ -39,9 +45,8 @@ export function pruneBundles(input: {
 }): PruneResult {
   const { keep: retainedBundleCount, lockTimeoutMs = 0 } = input
   const directory = resolveFilesystemPath(input.directory)
-  if (!Number.isInteger(retainedBundleCount) || retainedBundleCount < 1) {
-    throw new InvalidArgumentsException(`keep must be an integer >= 1 (got ${retainedBundleCount})`)
-  }
+  const keepProblem = pruneKeepProblem(retainedBundleCount)
+  if (keepProblem) throw new InvalidArgumentsException(keepProblem)
   const result: PruneResult = { removed: [], abandoned: [], failed: [] }
   assertDirectory(directory, { requirePrivateRoot: true })
   const lock = acquireLock(directory, lockTimeoutMs)

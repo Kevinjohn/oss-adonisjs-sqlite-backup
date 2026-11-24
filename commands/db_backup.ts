@@ -1,8 +1,8 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
-import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import * as errors from '../src/errors.js'
 import { BACKUP_ERROR_CODES, E_BACKUP_UNSAFE } from '../src/errors.js'
+import { pruneKeepProblem } from '../src/prune.js'
 import { resolveFilesystemPath } from '../src/paths.js'
 import { assertSafeLayout } from '../src/source.js'
 import type { PruneProgress, PruneResult } from '../src/types.js'
@@ -94,6 +94,10 @@ export default class DbBackup extends BaseCommand {
           return
         }
         case 'prune': {
+          if (this.keep !== undefined) {
+            const keepProblem = pruneKeepProblem(this.keep)
+            if (keepProblem) throw new E_BACKUP_UNSAFE(keepProblem)
+          }
           const result = await backup.prune({ keep: this.keep })
           this.reportPruneFailures(result.failed)
           this.logger.success(
@@ -107,13 +111,7 @@ export default class DbBackup extends BaseCommand {
       }
     } catch (error) {
       const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
-      const code = backupCode
-        ? `${backupCode}: `
-        : this.action === 'prune' &&
-            this.keep !== undefined &&
-            error instanceof InvalidArgumentsException
-          ? 'E_BACKUP_UNSAFE: '
-          : ''
+      const code = backupCode ? `${backupCode}: ` : ''
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
       const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)

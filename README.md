@@ -249,6 +249,9 @@ refuses an existing target. The bundle remains the recovery source.
 
 ## Errors
 
+The per-code exception classes below are unreleased. If you installed the v0.4.3 tarball,
+see the [v0.4.3 error API](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/v0.4.3/README.md#errors).
+
 Import the `errors` namespace to recognise an expected backup failure by class or by its
 stable `code`. Each backup exception has status 500.
 

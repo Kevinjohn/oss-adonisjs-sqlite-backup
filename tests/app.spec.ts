@@ -241,7 +241,7 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     noTarget.assertFailed()
     noTarget.assertLogMatches(/E_BACKUP_UNSAFE: restore-prepare needs --target/)
     const invalidKeep = await ace.exec('db:backup', ['prune', '--keep', '0'])
-    invalidKeep.assertFailed()
+    assert.equal(invalidKeep.exitCode, 1)
     invalidKeep.assertLogMatches(/E_BACKUP_UNSAFE: keep must be an integer >= 1/)
     const create = await ace.exec('db:backup', ['create'])
     create.assertSucceeded()
@@ -337,6 +337,24 @@ test.group('provider', () => {
       enabled.cleanup()
     }
   }).timeout(30_000)
+  test('prune with a valid keep flag reports malformed configuration accurately', async ({
+    assert,
+  }) => {
+    const { root, cleanup } = createTemporaryRoot()
+    const { app } = await bootApp(root)
+    try {
+      app.config.set('backup', { directory: join(root, 'backups'), requireWal: 'yes' })
+      const ace = await app.container.make('ace')
+      ace.ui.switchMode('raw')
+      const command = await ace.exec('db:backup', ['prune', '--keep', '7'])
+      assert.equal(command.exitCode, 1)
+      command.assertLogMatches(/db:backup prune failed: backup requireWal must be a boolean/)
+    } finally {
+      await app.terminate()
+      cleanup()
+    }
+  }).timeout(30_000)
+
   test('without config/backup.ts the binding fails with a fix-it message', async ({ assert }) => {
     const { root, cleanup } = createTemporaryRoot()
     const { app } = await bootApp(root, { withBackupConfig: false })
