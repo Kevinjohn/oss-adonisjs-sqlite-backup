@@ -14,6 +14,7 @@ As an application developer, I want to create a bundle from an existing SQLite h
 - A host can call `checkSource()` to resolve and open its configured file read-only, probe the schema and close the probe without creating a bundle. The application chooses when to perform this check. `livePath()` resolves the selected connection on each call. Both require an enabled directory.
 - Prepare the private root with `backup.prepareDirectory()` or `prepareDirectory(directory)` before calling create directly. With no handle, the service opens the configured file. Standalone callers supply `livePath`. The package closes its own handle on success and failure.
 - With `backup.create({ database })` or standalone `createBundle({ directory, source: { database } })`, the main file comes from the supplied handle. An unreadable or memory-only handle, an active transaction or a source under the archive root is refused. The caller keeps the handle and its settings. Create reads the main migration journal even with temporary tables or BigInt-mode results.
+- Service `create` accepts optional `now` and `database`; without a handle it resolves the configured source. Standalone `createBundle` requires `directory` and exactly one of `livePath` or `source: { database }`; optional `migrationsTable` defaults to `adonis_schema`, `lockTimeoutMs` to 0, `requireWal` to false and `now` to `Date.now`. The service derives the migration table and policy from its configuration.
 - Await the result to obtain the name, path, UTC creation time, manifest and warnings. The [create story](../create-bundle/us-op-01-create-bundle.md#code-flow) traces shared publication checks and cleanup. The returned name can select a bundle for [verification](../verify-bundle/us-op-03-verify-bundle.md) or [restore preparation](../prepare-restore/us-op-04-prepare-restore.md).
 
 ## User flow
@@ -31,6 +32,8 @@ flowchart TD
 ```
 
 ## Code flow
+
+Scope: source selection through the shared [create publication and cleanup flow](../create-bundle/us-op-01-create-bundle.md#code-flow).
 
 ```mermaid
 flowchart TD

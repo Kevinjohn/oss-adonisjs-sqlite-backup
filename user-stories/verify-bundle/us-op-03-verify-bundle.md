@@ -56,8 +56,9 @@ flowchart TD
     D --> E1
     E1 --> E["readManifest"]
     E --> F["assertMatchesManifest"]
-    F --> G["Check size, sha256, readDatabaseIntegrityProblem and assertMigrations"]
+    F --> G["assertMatchesManifest checks size, sha256, integrity and optional migrations"]
     E -->|Failure| H{"Was READY and now absent?"}
+    F -->|Failure| H
     G -->|Failure| H
     H -->|Yes| I["Throw E_BACKUP_NOT_FOUND"]
     H -->|No| K["Rethrow original error"]

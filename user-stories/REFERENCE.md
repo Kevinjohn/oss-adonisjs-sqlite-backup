@@ -2,7 +2,7 @@
 
 ## Source baseline and scope
 
-Fetched `origin/main` baseline: [`aa163d9330939dd9af774efe55228a323dd45fc5`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/aa163d9330939dd9af774efe55228a323dd45fc5). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Source baseline: [`11ec984f197962155c9405adabf02b5f87439680`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/11ec984f197962155c9405adabf02b5f87439680). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
@@ -15,7 +15,7 @@ The package exposes commands and APIs, not a graphical application workflow. `re
 
 ## Availability and evidence
 
-**Operator** marks setup and host commands. **Public API** marks developer-owned integration through the service or standalone exports. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
+**Operator** marks setup and host commands. **Public API** is this catalogue’s Current equivalent for developer-owned integration through the service or standalone exports. CLI and default service create/source checks require a configured Lucid SQLite file. Service `create({ database })` can instead use a supplied SQLite handle with the configured backup root; standalone `createBundle` accepts its explicit source and output configuration. List and verify need only the selected backup root; restore preparation also resolves the live path for safety. A nonempty configured directory enables configured operations; list/verify/restore root overrides work while configured backups are disabled. Source-reviewed availability does not establish that any runtime backup or recovery was exercised; linked tests were inspected as evidence locations only.
 
 ## Source map
 
@@ -47,7 +47,7 @@ operation fails, it attempts to remove a bundle directory only after this call c
 is best effort: the original failure is rethrown, with `cleanupError` attached when it is an
 `Error` and cleanup also fails. The Ace command reports the original error, reports an attached
 cleanup failure separately, and exits nonzero. A later `prune` removes unfinished bundles. Errors
-before lock acquisition have no acquired lock to release. Native close and lock-release failures can accompany the operation failure in `resourceCleanupErrors`. If native cleanup fails after publication, create attempts to unpublish and remove its own bundle before propagating the failure.
+before lock acquisition have no acquired lock to release. Native close and lock-release failures can accompany the operation failure in `resourceCleanupErrors`. Finalization attempts owned-source close and lock release before handling a resource-cleanup-only failure. That later failure can trigger unpublication and removal of the owned bundle after the archive lock was released; this cleanup does not reacquire the lock.
 
 Implementation: [createBundle](../src/bundles.ts), [acquireLock](../src/lock.ts) and
 [DbBackup.run](../commands/db_backup.ts).
