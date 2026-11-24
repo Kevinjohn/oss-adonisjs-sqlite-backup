@@ -1,6 +1,7 @@
 import { test } from '@japa/runner'
 import { join } from 'node:path'
-import { BACKUP_ERROR_CODES, BackupException } from '../src/errors.js'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
+import { BACKUP_ERROR_CODES, errors } from '../index.js'
 import { defineConfig } from '../src/define_config.js'
 import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.js'
 import { resolveSqliteSource } from '../src/source.js'
@@ -29,19 +30,18 @@ test.group('config and source resolution', () => {
   })
 
   test('invalid runtime types fail with configuration diagnostics', ({ assert }) => {
-    for (const [input, field, code] of [
-      [{ connection: '' }, 'connection', 'E_BACKUP_SOURCE'],
-      [{ connection: '   ' }, 'connection', 'E_BACKUP_SOURCE'],
-      [{ connection: 123 }, 'connection', 'E_BACKUP_SOURCE'],
-      [{ directory: false }, 'directory', 'E_BACKUP_UNSAFE'],
-      [{ requireWal: 'false' }, 'requireWal', 'E_BACKUP_SOURCE'],
+    for (const [input, field] of [
+      [{ connection: '' }, 'connection'],
+      [{ connection: '   ' }, 'connection'],
+      [{ connection: 123 }, 'connection'],
+      [{ directory: false }, 'directory'],
+      [{ requireWal: 'false' }, 'requireWal'],
     ] as const) {
       try {
         defineConfig(input as Parameters<typeof defineConfig>[0])
         assert.fail('accepted malformed config')
       } catch (error) {
-        assert.instanceOf(error, BackupException)
-        assert.equal((error as BackupException).code, code)
+        assert.instanceOf(error, InvalidArgumentsException)
         assert.include((error as Error).message, field)
       }
     }
@@ -82,15 +82,39 @@ test.group('config and source resolution', () => {
         resolveSqliteSource(config)
         assert.fail(`accepted ${JSON.stringify(config)}`)
       } catch (error) {
-        assert.instanceOf(error, BackupException)
-        assert.equal((error as BackupException).code, 'E_BACKUP_SOURCE')
+        assert.instanceOf(error, errors.E_BACKUP_SOURCE)
+        assert.propertyVal(error as object, 'code', 'E_BACKUP_SOURCE')
       }
     }
     assert.throws(() => resolveSqliteSource(sqlite('/a.db'), 'missing'), /not configured/)
   })
 
-  test('six error codes; bundle names round-trip', ({ assert }) => {
-    assert.lengthOf(BACKUP_ERROR_CODES, 6)
+  test('public backup errors keep distinct classes, codes, messages and causes', ({ assert }) => {
+    const cause = new Error('underlying SQLite failure')
+    const detail = 'backup diagnostic'
+    const cases = [
+      ['E_BACKUP_LOCKED', new errors.E_BACKUP_LOCKED(detail, { cause }), detail],
+      ['E_BACKUP_SOURCE', new errors.E_BACKUP_SOURCE(detail, { cause }), detail],
+      ['E_BACKUP_INVALID', new errors.E_BACKUP_INVALID(detail, { cause }), detail],
+      ['E_BACKUP_UNSAFE', new errors.E_BACKUP_UNSAFE(detail, { cause }), detail],
+      ['E_BACKUP_NOT_FOUND', new errors.E_BACKUP_NOT_FOUND(detail, { cause }), detail],
+      ['E_BACKUP_DISABLED', new errors.E_BACKUP_DISABLED({ cause }), 'backups are disabled'],
+    ] as const
+    assert.deepEqual(
+      BACKUP_ERROR_CODES,
+      cases.map(([code]) => code)
+    )
+    for (const [code, error, message] of cases) {
+      const matches = BACKUP_ERROR_CODES.filter((candidate) => error instanceof errors[candidate])
+      assert.deepEqual(matches, [code])
+      assert.equal(error.code, code)
+      assert.equal(error.status, 500)
+      assert.equal(error.message, message)
+      assert.strictEqual(error.cause, cause)
+    }
+  })
+
+  test('bundle names round-trip', ({ assert }) => {
     const ms = Date.UTC(2026, 10, 7, 4, 5, 6, 789)
     assert.equal(requireFormattedBundleName(ms), 'bak-utc-20261107-040506-789')
     assert.equal(requireBundleTimestamp(requireFormattedBundleName(ms)), ms)

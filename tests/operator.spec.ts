@@ -1,4 +1,6 @@
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
+import { errors } from '../index.js'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
@@ -44,6 +46,7 @@ test.group('operatorDatabasePath', (group) => {
     const unreadable = { primaryConnectionName: 'sqlite' } as unknown as Database
     assert.throws(
       () => operatorDatabasePath(unreadable, false),
+      InvalidArgumentsException,
       'Refusing without --confirm-server-stopped'
     )
   })
@@ -76,6 +79,7 @@ test.group('operatorDatabasePath', (group) => {
     ]) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
+        errors.E_BACKUP_SOURCE,
         'Operator commands require an existing on-disk database'
       )
     }
@@ -216,6 +220,7 @@ test.group('withOperatorDatabase', (group) => {
     try {
       await assert.rejects(
         () => withOperatorDatabase(db, async () => assert.fail('entered')),
+        errors.E_BACKUP_LOCKED,
         /Another process holds/
       )
     } finally {

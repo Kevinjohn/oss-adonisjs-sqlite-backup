@@ -2,7 +2,7 @@ import { existsSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertDirectory } from './directory.js'
 import { listBundleDirectoryNames } from './bundles.js'
-import { BackupException } from './errors.js'
+import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import { resolveFilesystemPath } from './paths.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
@@ -14,7 +14,7 @@ function attachProgress(error: unknown, progress: PruneProgress): Error {
   const failure =
     error instanceof Error && Object.isExtensible(error)
       ? error
-      : new Error(String(error), { cause: error })
+      : new RuntimeException(String(error), { cause: error })
   return Object.defineProperty(failure, 'pruneProgress', { value: progress })
 }
 
@@ -24,6 +24,13 @@ function attachProgress(error: unknown, progress: PruneProgress): Error {
  * an unfinished bundle seen under the lock belongs to a create that crashed. Only directories
  * matching the bundle name pattern are ever touched. Per-item failures are returned in the result.
  * If finalization fails, the thrown error carries the observed `pruneProgress`.
+ *
+ * @example
+ * ```ts
+ * import { pruneBundles } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const result = pruneBundles({ directory: 'storage/backups', keep: 7 })
+ * ```
  */
 export function pruneBundles(input: {
   directory: string
@@ -33,10 +40,7 @@ export function pruneBundles(input: {
   const { keep: retainedBundleCount, lockTimeoutMs = 0 } = input
   const directory = resolveFilesystemPath(input.directory)
   if (!Number.isInteger(retainedBundleCount) || retainedBundleCount < 1) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
-      `keep must be an integer >= 1 (got ${retainedBundleCount})`
-    )
+    throw new InvalidArgumentsException(`keep must be an integer >= 1 (got ${retainedBundleCount})`)
   }
   const result: PruneResult = { removed: [], abandoned: [], failed: [] }
   assertDirectory(directory, { requirePrivateRoot: true })

@@ -9,6 +9,26 @@
   a failed one as `❯ error <file>`, and a database with nothing pending as `Already up to date`.
   A calling command should not report the copied `error` again; the README example does not.
 
+- Replace the `BackupException` and `errors.BackupException` exports with one exception class per
+  backup code. Match the corresponding class with `instanceof` or continue matching
+  `error.code`. `BackupErrorCode` and `BACKUP_ERROR_CODES` remain available.
+
+  | Previous exception check                    | Replacement                 |
+  | ------------------------------------------- | --------------------------- |
+  | `BackupException` with `E_BACKUP_LOCKED`    | `errors.E_BACKUP_LOCKED`    |
+  | `BackupException` with `E_BACKUP_SOURCE`    | `errors.E_BACKUP_SOURCE`    |
+  | `BackupException` with `E_BACKUP_INVALID`   | `errors.E_BACKUP_INVALID`   |
+  | `BackupException` with `E_BACKUP_UNSAFE`    | `errors.E_BACKUP_UNSAFE`    |
+  | `BackupException` with `E_BACKUP_NOT_FOUND` | `errors.E_BACKUP_NOT_FOUND` |
+  | `BackupException` with `E_BACKUP_DISABLED`  | `errors.E_BACKUP_DISABLED`  |
+
+- Malformed backup configuration and invalid API arguments for retention or lock timeout now
+  throw AdonisJS's `InvalidArgumentsException`. Missing backup configuration throws
+  AdonisJS's `RuntimeException`. Operator guards use framework exceptions for invalid arguments
+  and pool state, `errors.E_BACKUP_SOURCE` for a missing on-disk source, and
+  `errors.E_BACKUP_LOCKED` for exclusive-lock contention.
+- Add TypeScript examples to the public API documentation.
+
 ## 0.4.3 - 2026-11-24
 
 - Document operator and live database path requirements, pre-migration destinations and the scope of scheduled retention.

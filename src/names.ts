@@ -1,4 +1,4 @@
-import { BackupException } from './errors.js'
+import { E_BACKUP_UNSAFE } from './errors.js'
 
 /** Bundle directory names: UTC timestamp, millisecond precision, strictly increasing per directory. */
 export const BUNDLE_RE = /^bak-utc-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/
@@ -22,7 +22,7 @@ function formatBundleName(ms: number): string {
 /** The name for a timestamp. Throws rather than produce a name `BUNDLE_RE` would reject. */
 export function requireFormattedBundleName(ms: number): string {
   if (!Number.isInteger(ms) || ms < MIN_STAMP || ms > MAX_STAMP) {
-    throw new BackupException('E_BACKUP_UNSAFE', `timestamp ${ms} is outside the bundle name range`)
+    throw new E_BACKUP_UNSAFE(`timestamp ${ms} is outside the bundle name range`)
   }
   return formatBundleName(ms)
 }
@@ -44,7 +44,7 @@ function readBundleTimestamp(name: string): number | undefined {
 export function requireBundleTimestamp(name: string): number {
   const stamp = readBundleTimestamp(name)
   if (stamp === undefined) {
-    throw new BackupException('E_BACKUP_UNSAFE', `"${name}" is not a bundle name`)
+    throw new E_BACKUP_UNSAFE(`"${name}" is not a bundle name`)
   }
   return stamp
 }

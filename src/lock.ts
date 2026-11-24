@@ -1,14 +1,23 @@
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } from 'node:fs'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
-import { BackupException } from './errors.js'
+import { E_BACKUP_LOCKED, E_BACKUP_UNSAFE } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
 import { resolveFilesystemPath } from './paths.js'
 import { LOCK_FILE } from './names.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 
 export interface DirectoryLock {
+  /**
+   * Release the directory lock after the protected operation finishes.
+   *
+   * @example
+   * ```ts
+   * lock.release()
+   * ```
+   */
   release(): void
 }
 
@@ -18,8 +27,7 @@ export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
 
 export function assertLockTimeout(timeoutMs: number): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
+    throw new InvalidArgumentsException(
       `backup lockTimeoutMs must be an integer between 0 and ${MAX_LOCK_TIMEOUT_MS}`
     )
   }
@@ -30,7 +38,7 @@ function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   try {
     handle = openDatabase(path, { timeout: timeoutMs })
   } catch (cause) {
-    throw new BackupException('E_BACKUP_UNSAFE', `cannot open lock file ${path}`, { cause })
+    throw new E_BACKUP_UNSAFE(`cannot open lock file ${path}`, { cause })
   }
   try {
     handle.exec('BEGIN EXCLUSIVE')
@@ -55,17 +63,14 @@ function truncateLockFile(path: string): void {
   try {
     fd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   } catch (cause) {
-    throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`, {
+    throw new E_BACKUP_UNSAFE(`lock path ${path} is not a regular file`, {
       cause,
     })
   }
   try {
     const stat = fstatSync(fd)
     if (!stat.isFile() || stat.nlink !== 1) {
-      throw new BackupException(
-        'E_BACKUP_UNSAFE',
-        `lock path ${path} must be a singly linked regular file`
-      )
+      throw new E_BACKUP_UNSAFE(`lock path ${path} must be a singly linked regular file`)
     }
     ftruncateSync(fd, 0)
   } finally {
@@ -82,13 +87,25 @@ function truncateLockFile(path: string): void {
  * The lock file never holds data, so a damaged (non-empty, non-SQLite) one is truncated and the
  * lock retried. That is safe: nobody can hold a lock on a damaged file, and truncating the empty
  * file another process has just locked changes nothing.
+ *
+ * @example
+ * ```ts
+ * import { acquireLock, listBundles } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const lock = acquireLock('storage/backups')
+ * try {
+ *   const bundles = listBundles('storage/backups')
+ * } finally {
+ *   lock.release()
+ * }
+ * ```
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   assertLockTimeout(timeoutMs)
   const path = join(resolveFilesystemPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
-    throw new BackupException('E_BACKUP_UNSAFE', `lock path ${path} is not a regular file`)
+    throw new E_BACKUP_UNSAFE(`lock path ${path} is not a regular file`)
   }
   let handle: NativeDatabase
   try {
@@ -99,7 +116,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
     const code = (error as { code?: string }).code
     if (code === 'SQLITE_BUSY') {
-      throw new BackupException('E_BACKUP_LOCKED', `backup directory ${directory} is locked`, {
+      throw new E_BACKUP_LOCKED(`backup directory ${directory} is locked`, {
         cause: error,
       })
     }
@@ -153,7 +170,7 @@ export async function acquireCreateLock(directory: string, timeoutMs = 0): Promi
     try {
       return acquireLock(directory)
     } catch (error) {
-      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_LOCKED') throw error
+      if (!(error instanceof E_BACKUP_LOCKED)) throw error
       const remaining = deadline - performance.now()
       if (remaining <= 0) throw error
       await delay(Math.min(remaining, 10))

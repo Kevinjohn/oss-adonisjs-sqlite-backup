@@ -14,7 +14,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { assertDirectory } from './directory.js'
 import { assertMigrations, readMigrationRows } from './migrations.js'
 import { readDatabaseIntegrityProblem } from './checks.js'
-import { BackupException } from './errors.js'
+import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
 import { resolveFilesystemPath } from './paths.js'
 import { hashFileSha256, syncPath, writeDurable } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
@@ -51,7 +51,16 @@ export function listBundleDirectoryNames(directory: string): string[] {
     .sort()
 }
 
-/** Published bundles only (READY present), oldest first. Name order is creation order. */
+/**
+ * Published bundles only (READY present), oldest first. Name order is creation order.
+ *
+ * @example
+ * ```ts
+ * import { listBundles } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const bundles = listBundles('storage/backups')
+ * ```
+ */
 export function listBundles(folder: string): BundleSummary[] {
   const directory = resolveFilesystemPath(folder)
   return listBundleDirectoryNames(directory).flatMap((name) => {
@@ -78,16 +87,16 @@ export function requireSelectedBundle(directory: string, name?: string): BundleL
     requireBundleTimestamp(name)
     const path = join(directory, name)
     const stat = lstatSync(path, { throwIfNoEntry: false })
-    if (!stat) throw new BackupException('E_BACKUP_NOT_FOUND', `no bundle ${name}`)
+    if (!stat) throw new E_BACKUP_NOT_FOUND(`no bundle ${name}`)
     if (!stat.isDirectory()) {
-      throw new BackupException('E_BACKUP_UNSAFE', `${name} is not a bundle directory`)
+      throw new E_BACKUP_UNSAFE(`${name} is not a bundle directory`)
     }
     return { name, path }
   }
   const newest = listBundleDirectoryNames(directory)
     .filter((entry) => existsSync(join(directory, entry, READY)))
     .at(-1)
-  if (!newest) throw new BackupException('E_BACKUP_NOT_FOUND', `no READY bundle in ${directory}`)
+  if (!newest) throw new E_BACKUP_NOT_FOUND(`no READY bundle in ${directory}`)
   return { name: newest, path: join(directory, newest) }
 }
 
@@ -106,14 +115,14 @@ function isMigrationManifest(value: unknown): value is NonNullable<BundleManifes
 /** Read the manifest of a published bundle; a missing READY means the bundle does not exist yet. */
 export function readManifest(bundle: BundleLocation): BundleManifest {
   if (!existsSync(join(bundle.path, READY))) {
-    throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} has no READY marker`)
+    throw new E_BACKUP_INVALID(`bundle ${bundle.name} has no READY marker`)
   }
   try {
     if (
       !lstatSync(join(bundle.path, READY)).isFile() ||
       !lstatSync(join(bundle.path, MANIFEST)).isFile()
     ) {
-      throw new Error('expected regular READY and manifest files')
+      throw new E_BACKUP_INVALID('expected regular READY and manifest files')
     }
     const manifest = JSON.parse(readFileSync(join(bundle.path, MANIFEST), 'utf8')) as BundleManifest
     if (
@@ -124,10 +133,10 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
       (Object.hasOwn(manifest, 'migrations') && !isMigrationManifest(manifest.migrations))
     )
-      throw new Error('bad shape')
+      throw new E_BACKUP_INVALID('bad shape')
     return manifest
   } catch (cause) {
-    throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} manifest is unreadable`, {
+    throw new E_BACKUP_INVALID(`bundle ${bundle.name} manifest is unreadable`, {
       cause,
     })
   }
@@ -138,24 +147,31 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
   let matches: boolean
   try {
     const stat = lstatSync(path)
-    if (!stat.isFile()) throw new Error('expected a regular database file')
+    if (!stat.isFile()) throw new E_BACKUP_INVALID('expected a regular database file')
     matches = stat.size === manifest.bytes && hashFileSha256(path) === manifest.sha256
   } catch (cause) {
-    throw new BackupException('E_BACKUP_INVALID', `${label}: database file cannot be read`, {
+    throw new E_BACKUP_INVALID(`${label}: database file cannot be read`, {
       cause,
     })
   }
   if (!matches) {
-    throw new BackupException('E_BACKUP_INVALID', `${label}: checksum does not match manifest`)
+    throw new E_BACKUP_INVALID(`${label}: checksum does not match manifest`)
   }
   const problem = readDatabaseIntegrityProblem(path)
-  if (problem) throw new BackupException('E_BACKUP_INVALID', `${label}: ${problem}`)
+  if (problem) throw new E_BACKUP_INVALID(`${label}: ${problem}`)
   if (manifest.migrations) assertMigrations(path, manifest.migrations)
 }
 
 /**
  * Re-verify a published bundle in place. Lock-free: if prune unpublishes the bundle while it is
  * being checked, the result is E_BACKUP_NOT_FOUND, not a false E_BACKUP_INVALID.
+ *
+ * @example
+ * ```ts
+ * import { verifyBundle } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const verified = verifyBundle('storage/backups')
+ * ```
  */
 export function verifyBundle(folder: string, name?: string): BundleLocation {
   const directory = resolveFilesystemPath(folder)
@@ -170,7 +186,7 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
     return bundle
   } catch (error) {
     if (wasReady && !existsSync(join(bundle.path, READY))) {
-      throw new BackupException('E_BACKUP_NOT_FOUND', `bundle ${bundle.name} was pruned`, {
+      throw new E_BACKUP_NOT_FOUND(`bundle ${bundle.name} was pruned`, {
         cause: error,
       })
     }
@@ -181,6 +197,17 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
 /**
  * Online copy -> full checks -> manifest -> READY last, all under the directory lock.
  * A bundle without READY is not a backup; prune removes it once nobody holds the lock.
+ *
+ * @example
+ * ```ts
+ * import { createBundle, prepareDirectory } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * prepareDirectory('storage/backups')
+ * const bundle = await createBundle({
+ *   livePath: 'storage/orchard.sqlite',
+ *   directory: 'storage/backups',
+ * })
+ * ```
  */
 export async function createBundle(
   input: (
@@ -237,21 +264,20 @@ export async function createBundle(
       source = borrowed ?? openOwnedSource(livePath)
       journalMode = String(source.pragma('journal_mode', { simple: true }))
     } catch (cause) {
-      if (cause instanceof BackupException) throw cause
-      throw new BackupException('E_BACKUP_SOURCE', `live database ${livePath} cannot be read`, {
+      if (cause instanceof E_BACKUP_SOURCE) throw cause
+      throw new E_BACKUP_SOURCE(`live database ${livePath} cannot be read`, {
         cause,
       })
     }
     // The backup API cannot run from a connection with an open transaction.
     if (source.inTransaction) {
-      throw new BackupException(
-        'E_BACKUP_SOURCE',
+      throw new E_BACKUP_SOURCE(
         'the borrowed database handle has an open transaction; commit or roll it back first'
       )
     }
     if (journalMode !== 'wal') {
       const message = `live database uses journal_mode=${journalMode}, not WAL: writers in other processes wait for the whole copy`
-      if (requireWal) throw new BackupException('E_BACKUP_SOURCE', message)
+      if (requireWal) throw new E_BACKUP_SOURCE(message)
       warnings.push(message)
     }
     // Names must stay strictly increasing even if the clock steps back, because prune orders by
@@ -260,8 +286,7 @@ export async function createBundle(
     const newest = listBundleDirectoryNames(directory).at(-1)
     const newestStamp = newest ? requireBundleTimestamp(newest) : Number.NEGATIVE_INFINITY
     if (newestStamp > clock + MAX_FUTURE_MS) {
-      throw new BackupException(
-        'E_BACKUP_UNSAFE',
+      throw new E_BACKUP_UNSAFE(
         `newest bundle ${newest} is dated more than 24 h after the clock; fix the clock or move it`
       )
     }
@@ -272,7 +297,7 @@ export async function createBundle(
       mkdirSync(join(directory, name), { mode: 0o700 })
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause
-      throw new BackupException('E_BACKUP_UNSAFE', `${join(directory, name)} already exists`, {
+      throw new E_BACKUP_UNSAFE(`${join(directory, name)} already exists`, {
         cause,
       })
     }
@@ -299,16 +324,13 @@ export async function createBundle(
     const journal = openDatabase(file, { fileMustExist: true, readonly: true })
     try {
       if (!isDeepStrictEqual(readMigrationRows(journal, migrationsTable), migrations)) {
-        throw new BackupException(
-          'E_BACKUP_INVALID',
-          `new backup migration journal ${migrationsTable} mismatch`
-        )
+        throw new E_BACKUP_INVALID(`new backup migration journal ${migrationsTable} mismatch`)
       }
     } finally {
       journal.close()
     }
     const problem = readDatabaseIntegrityProblem(file)
-    if (problem) throw new BackupException('E_BACKUP_INVALID', `new backup failed: ${problem}`)
+    if (problem) throw new E_BACKUP_INVALID(`new backup failed: ${problem}`)
     chmodSync(file, 0o400)
     syncPath(file)
     internalHooks.step?.('create:checked', file)
@@ -329,7 +351,7 @@ export async function createBundle(
         : {}),
     }
     if (manifest.migrations && !isMigrationManifest(manifest.migrations)) {
-      throw new BackupException('E_BACKUP_INVALID', 'new backup has unsupported migration metadata')
+      throw new E_BACKUP_INVALID('new backup has unsupported migration metadata')
     }
     writeDurable(join(bundlePath, MANIFEST), JSON.stringify(manifest, null, 2))
     syncPath(bundlePath)

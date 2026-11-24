@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
-import { BackupException } from './errors.js'
+import { E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 import { resolveFilesystemPath } from './paths.js'
 import type { LucidDatabaseConfig } from './types.js'
@@ -15,15 +15,28 @@ export function normalizeConfiguredSqliteFilename(filename: string, client: stri
 /** Open a resolved, owned source only when the native driver will use that exact file path. */
 export function openOwnedSource(path: string): NativeDatabase {
   if (normalizeConfiguredSqliteFilename(path, 'better-sqlite3') !== path) {
-    throw new BackupException(
-      'E_BACKUP_SOURCE',
+    throw new E_BACKUP_SOURCE(
       `live database ${JSON.stringify(path)} cannot be read: better-sqlite3 changes its filename when opening it`
     )
   }
   return openDatabase(path, { fileMustExist: true, readonly: true })
 }
 
-/** Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would. */
+/**
+ * Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would.
+ *
+ * @example
+ * ```ts
+ * import { resolveSqliteSource } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const livePath = resolveSqliteSource({
+ *   connection: 'orchard',
+ *   connections: {
+ *     orchard: { client: 'better-sqlite3', connection: { filename: 'storage/orchard.sqlite' } },
+ *   },
+ * })
+ * ```
+ */
 export function resolveSqliteSource(
   database: LucidDatabaseConfig | undefined,
   connectionName?: string
@@ -31,21 +44,21 @@ export function resolveSqliteSource(
   const name = connectionName ?? database?.connection
   const node = name ? database?.connections?.[name] : undefined
   if (!name || !node) {
-    throw new BackupException('E_BACKUP_SOURCE', `Lucid connection "${name}" is not configured`)
+    throw new E_BACKUP_SOURCE(`Lucid connection "${name}" is not configured`)
   }
   if (!SQLITE_CLIENTS.has(node.client)) {
-    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" uses ${node.client}`)
+    throw new E_BACKUP_SOURCE(`connection "${name}" uses ${node.client}`)
   }
   const configuredFilename = (node.connection as { filename?: unknown } | undefined)?.filename
   if (typeof configuredFilename !== 'string') {
-    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
+    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
   }
   const filename = normalizeConfiguredSqliteFilename(configuredFilename, node.client)
   if (filename === '' || filename === ':memory:') {
-    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" is not file-backed`)
+    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
   }
   if (/^file:/i.test(filename)) {
-    throw new BackupException('E_BACKUP_SOURCE', `connection "${name}" uses a URI filename`)
+    throw new E_BACKUP_SOURCE(`connection "${name}" uses a URI filename`)
   }
   return resolveFilesystemPath(filename)
 }
@@ -66,10 +79,7 @@ export function isWithin(parent: string, child: string): boolean {
 export function assertSafeLayout(livePath: string, directory: string): void {
   const stat = statSync(livePath, { throwIfNoEntry: false })
   if (!stat?.isFile()) {
-    throw new BackupException(
-      'E_BACKUP_SOURCE',
-      `live database ${livePath} is not an existing file`
-    )
+    throw new E_BACKUP_SOURCE(`live database ${livePath} is not an existing file`)
   }
   assertSourceOutsideDirectory(livePath, directory)
 }
@@ -77,10 +87,7 @@ export function assertSafeLayout(livePath: string, directory: string): void {
 /** Reject a backup directory containing the configured live path. Both paths are canonical. */
 export function assertSourceOutsideDirectory(livePath: string, directory: string): void {
   if (isWithin(directory, livePath)) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
-      `backup directory ${directory} contains the live database`
-    )
+    throw new E_BACKUP_UNSAFE(`backup directory ${directory} contains the live database`)
   }
 }
 
@@ -90,9 +97,9 @@ export function requireBorrowedSourcePath(database: NativeDatabase): string {
     const files = database.pragma('database_list') as Array<{ name: string; file: string }>
     const filename = files.find((entry) => entry.name === 'main')?.file
     if (!filename || /^file:/i.test(filename))
-      throw new Error('source must be a file-backed SQLite database')
+      throw new E_BACKUP_SOURCE('source must be a file-backed SQLite database')
     return resolveFilesystemPath(filename)
   } catch (cause) {
-    throw new BackupException('E_BACKUP_SOURCE', 'borrowed database cannot be read', { cause })
+    throw new E_BACKUP_SOURCE('borrowed database cannot be read', { cause })
   }
 }

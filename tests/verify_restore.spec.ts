@@ -1,3 +1,4 @@
+import { BACKUP_ERROR_CODES, errors } from '../index.js'
 import { prepared } from './helpers.js'
 import { test } from '@japa/runner'
 import {
@@ -24,7 +25,9 @@ const readBackupErrorCode = (fn: () => unknown) => {
   try {
     fn()
   } catch (error) {
-    return (error as { code?: string }).code
+    const code = (error as { code?: string }).code
+    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
+    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
   }
   return 'no error'
 }
@@ -136,7 +139,7 @@ test.group('verify and prepareRestore', (group) => {
     const offset = bytes.indexOf(Buffer.from('x'.repeat(64)))
     chmodSync(db, 0o600)
     overwrite(db, offset, 'y'.repeat(64)) // row text only; the file stays structurally valid
-    assert.throws(() => verifyBundle(directory, name), /checksum/)
+    assert.throws(() => verifyBundle(directory, name), errors.E_BACKUP_INVALID, /checksum/)
   })
 
   test('verify runs the integrity check, not only the checksum', async ({ assert }) => {
@@ -287,6 +290,7 @@ test.group('verify and prepareRestore', (group) => {
           return caught as Error & { code?: string; cleanupError?: NodeJS.ErrnoException }
         }
       })()
+      assert.instanceOf(error, errors.E_BACKUP_INVALID)
       assert.equal(error?.code, 'E_BACKUP_INVALID')
       assert.equal(error?.cleanupError?.code, 'EACCES')
     } finally {

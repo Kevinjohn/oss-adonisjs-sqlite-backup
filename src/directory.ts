@@ -1,10 +1,19 @@
 import { chmodSync, lstatSync, mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { BackupException } from './errors.js'
+import { E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.js'
 import { syncPath } from './fs.js'
 import { resolveFilesystemPath } from './paths.js'
 
-/** Create or tighten a backup root to owner-only access. Call once at startup. */
+/**
+ * Create or tighten a backup root to owner-only access. Call once at startup.
+ *
+ * @example
+ * ```ts
+ * import { prepareDirectory } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * prepareDirectory('storage/backups')
+ * ```
+ */
 export function prepareDirectory(path: string): void {
   const directory = resolveFilesystemPath(path)
   const missingDirectories: string[] = []
@@ -38,11 +47,9 @@ export function assertDirectory(
   { requirePrivateRoot = false }: AssertDirectoryOptions = {}
 ): void {
   const stat = statSync(directory, { throwIfNoEntry: false })
-  if (!stat)
-    throw new BackupException('E_BACKUP_NOT_FOUND', `backup directory ${directory} is missing`)
+  if (!stat) throw new E_BACKUP_NOT_FOUND(`backup directory ${directory} is missing`)
   if (!stat.isDirectory() || (requirePrivateRoot && (stat.mode & 0o022) !== 0)) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
+    throw new E_BACKUP_UNSAFE(
       `backup directory ${directory} must be a private directory; run prepareDirectory() to set mode 0700`
     )
   }

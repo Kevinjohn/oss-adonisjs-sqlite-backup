@@ -1,5 +1,5 @@
+import { RuntimeException } from '@adonisjs/core/exceptions'
 import type { ApplicationService } from '@adonisjs/core/types'
-import { BackupException } from '../src/errors.js'
 import { defineConfig } from '../src/define_config.js'
 import { SqliteBackup } from '../src/sqlite_backup.js'
 import type { BackupConfig, LucidDatabaseConfig } from '../src/types.js'
@@ -18,8 +18,7 @@ export default class SqliteBackupProvider {
     this.app.container.singleton('sqlite.backup', () => {
       const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
       if (!config) {
-        throw new BackupException(
-          'E_BACKUP_SOURCE',
+        throw new RuntimeException(
           'config/backup.ts is missing: run "node ace configure @kevinjohn/adonisjs-sqlite-backup"'
         )
       }

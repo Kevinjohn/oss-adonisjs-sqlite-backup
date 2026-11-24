@@ -106,11 +106,9 @@ unsafe root still throws from `checkSource()` or `prepareDirectory()` and stops 
 Do not run those calls before the application has booted. The root entry point and standalone
 utilities do not require a booted AdonisJS application. `defineConfig` checks that a supplied
 `connection` is a non-blank string, `directory` is a string (empty disables configured operations),
-and `requireWal` is boolean. Incorrect source settings (`connection`, `requireWal`) produce
-`E_BACKUP_SOURCE`; incorrect `directory`, `keep` and `lockTimeoutMs` settings produce
-`E_BACKUP_UNSAFE`. Configuration errors are a `BackupException` by design, a departure from the
-usual AdonisJS practice of throwing a framework exception from `defineConfig`: one error type and
-code set covers configuration and backup failures alike.
+and `requireWal` is boolean. Invalid settings throw AdonisJS's `InvalidArgumentsException`.
+Resolving the service without `config/backup.ts` throws AdonisJS's `RuntimeException` and includes
+the configure command.
 
 Configured preparation and prune refuse a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
@@ -251,15 +249,34 @@ refuses an existing target. The bundle remains the recovery source.
 
 ## Errors
 
-Expected backup failures (create, list, verify, restore preparation, prune and the directory
-lock) are a `BackupException` with one of six codes: `E_BACKUP_LOCKED`, `E_BACKUP_SOURCE`,
-`E_BACKUP_INVALID`, `E_BACKUP_UNSAFE`, `E_BACKUP_NOT_FOUND`, `E_BACKUP_DISABLED`.
-`E_BACKUP_LOCKED` covers a lock held by another process or by an earlier operation on the same
-event loop; `E_BACKUP_NOT_FOUND` covers a missing backup root as well as a missing bundle.
-`E_BACKUP_UNSAFE` names a refused layout or path; it does not by itself mean that no write was
-attempted. `E_BACKUP_SOURCE` and `E_BACKUP_UNSAFE` also report invalid configuration, as described
-under Service and configuration. Unexpected system errors (permissions, a full disk) are passed
-through unchanged.
+Import the `errors` namespace to recognise an expected backup failure by class or by its
+stable `code`. Each backup exception has status 500.
+
+```ts
+import { errors } from '@kevinjohn/adonisjs-sqlite-backup'
+import backup from '@kevinjohn/adonisjs-sqlite-backup/services/main'
+
+try {
+  await backup.create()
+} catch (error) {
+  if (!(error instanceof errors.E_BACKUP_LOCKED)) throw error
+  // Another operation holds the backup directory lock. Retry later.
+}
+```
+
+| Exception                   | When it is thrown                                                                            |
+| --------------------------- | -------------------------------------------------------------------------------------------- |
+| `errors.E_BACKUP_LOCKED`    | Another process or an earlier operation on the same event loop holds the lock.               |
+| `errors.E_BACKUP_SOURCE`    | The SQLite source is unsupported, unavailable, or fails a source check.                      |
+| `errors.E_BACKUP_INVALID`   | Verification failed, or a partial write prevented publication.                               |
+| `errors.E_BACKUP_UNSAFE`    | A path, layout, or operation failed a safety check. A write may already have been attempted. |
+| `errors.E_BACKUP_NOT_FOUND` | The backup directory or selected bundle is missing.                                          |
+| `errors.E_BACKUP_DISABLED`  | Backups are disabled. Pass an explicit directory for recovery reads.                         |
+
+Invalid API arguments such as a negative lock timeout or a retention count below one throw
+AdonisJS's `InvalidArgumentsException`. Unexpected system errors such as a full disk can
+propagate as native errors. A backup exception includes the underlying error as its `cause`
+when it wraps one.
 
 If create fails and removing its unfinished bundle also fails, the original `Error` is rethrown
 with the cleanup failure on its `cleanupError` property. The command prints the original failure
@@ -267,15 +284,15 @@ and a separate cleanup-failure line, then exits 1. An unfinished bundle is never
 a later successful prune removes it. Restore preparation attaches `cleanupError` in the same way
 when it cannot remove the staged file it created.
 
-The stopped-server operator helpers have a separate contract. Their operator preconditions and
-cleanup throw plain `Error`s, not `BackupException`, and carry no code:
+Stopped-server operator helpers report these preconditions and failures:
 
-- `operatorDatabasePath` throws an `Error` when confirmation is missing, the primary connection is
-  not a single-connection `better-sqlite3` pool, or the database is not an existing file.
-- `withOperatorDatabase` throws an `Error` for an overlapping call on the same `Database`. When
-  the exclusive lock meets `SQLITE_BUSY`, it throws
-  `Another process holds this database; stop the server and retry` with the native error as
-  `cause`; other lock setup errors pass through unchanged.
+- `operatorDatabasePath` throws `InvalidArgumentsException` when confirmation is missing or the
+  primary connection is incompatible. An unavailable on-disk database throws
+  `errors.E_BACKUP_SOURCE`.
+- `withOperatorDatabase` throws `RuntimeException` for an overlapping call on the same
+  `Database` or an inconsistent pool state. When exclusive acquisition meets `SQLITE_BUSY`, it
+  throws `errors.E_BACKUP_LOCKED` with the native error as `cause` and advises stopping the server
+  before retrying. Other lock setup errors retain their native type.
 - A single failure, from the lock, the work or cleanup, is thrown unchanged. When more than one
   occurs, an `AggregateError` (`Operator database cleanup failed`) lists the lock or work failure
   first, then cleanup failures in the order they were observed.

@@ -1,44 +1,87 @@
 import { Exception } from '@adonisjs/core/exceptions'
 
-/** The complete error-code set. Each names what the caller should do next. */
-export type BackupErrorCode =
-  /** The backup directory lock is held, by another process or this event loop. Retry later. */
-  | 'E_BACKUP_LOCKED'
-  /**
-   * The source cannot be backed up (not SQLite, not a file, missing, or not WAL when required),
-   * `config/backup.ts` is missing, or its `connection` or `requireWal` setting is invalid.
-   */
-  | 'E_BACKUP_SOURCE'
-  /** A bundle or copy failed verification (missing READY, checksum, integrity or FK check). */
-  | 'E_BACKUP_INVALID'
-  /**
-   * The request would touch the live database, overwrite something, or use an unsafe path, or a
-   * `directory`, `keep` or `lockTimeoutMs` setting is invalid.
-   */
-  | 'E_BACKUP_UNSAFE'
-  /** No bundle with that name, no READY bundle at all, or the backup root is missing. */
-  | 'E_BACKUP_NOT_FOUND'
-  /** Scheduled backups are disabled; supply an explicit directory for recovery. */
-  | 'E_BACKUP_DISABLED'
-
-export const BACKUP_ERROR_CODES: readonly BackupErrorCode[] = [
-  'E_BACKUP_LOCKED',
-  'E_BACKUP_SOURCE',
-  'E_BACKUP_INVALID',
-  'E_BACKUP_UNSAFE',
-  'E_BACKUP_NOT_FOUND',
-  'E_BACKUP_DISABLED',
-]
-
-/**
- * The error for expected backup failures; `code` is one of {@link BackupErrorCode}. The
- * stopped-server operator helpers throw plain `Error`s instead (see `withOperatorDatabase`).
- */
-export class BackupException extends Exception {
+/** A backup lock is held by another operation. Retry later. */
+export class BackupLockedException extends Exception {
+  static code = 'E_BACKUP_LOCKED' as const
   static status = 500
-  declare code: BackupErrorCode
+  declare code: typeof BackupLockedException.code
 
-  constructor(code: BackupErrorCode, message: string, options?: { cause?: unknown }) {
-    super(message, { code, status: BackupException.status, cause: options?.cause })
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
   }
 }
+
+/** A SQLite source does not meet the operation's requirements. */
+export class BackupSourceException extends Exception {
+  static code = 'E_BACKUP_SOURCE' as const
+  static status = 500
+  declare code: typeof BackupSourceException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
+  }
+}
+
+/** A bundle or copy failed verification. */
+export class BackupInvalidException extends Exception {
+  static code = 'E_BACKUP_INVALID' as const
+  static status = 500
+  declare code: typeof BackupInvalidException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
+  }
+}
+
+/** The request failed a path, layout or operation safety check. */
+export class BackupUnsafeException extends Exception {
+  static code = 'E_BACKUP_UNSAFE' as const
+  static status = 500
+  declare code: typeof BackupUnsafeException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
+  }
+}
+
+/** No selected bundle or backup root was found. */
+export class BackupNotFoundException extends Exception {
+  static code = 'E_BACKUP_NOT_FOUND' as const
+  static status = 500
+  declare code: typeof BackupNotFoundException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
+  }
+}
+
+/** Configured backups are disabled. Supply an explicit directory for recovery. */
+export class BackupDisabledException extends Exception {
+  static code = 'E_BACKUP_DISABLED' as const
+  static status = 500
+  static message = 'backups are disabled'
+  declare code: typeof BackupDisabledException.code
+
+  constructor(options?: ErrorOptions) {
+    super(undefined, { cause: options?.cause })
+  }
+}
+
+export const E_BACKUP_LOCKED = BackupLockedException
+export const E_BACKUP_SOURCE = BackupSourceException
+export const E_BACKUP_INVALID = BackupInvalidException
+export const E_BACKUP_UNSAFE = BackupUnsafeException
+export const E_BACKUP_NOT_FOUND = BackupNotFoundException
+export const E_BACKUP_DISABLED = BackupDisabledException
+
+/** The stable code for each expected backup failure. */
+export type BackupErrorCode = (typeof BACKUP_ERROR_CODES)[number]
+
+export const BACKUP_ERROR_CODES = [
+  E_BACKUP_LOCKED.code,
+  E_BACKUP_SOURCE.code,
+  E_BACKUP_INVALID.code,
+  E_BACKUP_UNSAFE.code,
+  E_BACKUP_NOT_FOUND.code,
+  E_BACKUP_DISABLED.code,
+] as const

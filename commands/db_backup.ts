@@ -1,6 +1,8 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
-import { BackupException } from '../src/errors.js'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
+import * as errors from '../src/errors.js'
+import { BACKUP_ERROR_CODES, E_BACKUP_UNSAFE } from '../src/errors.js'
 import { resolveFilesystemPath } from '../src/paths.js'
 import { assertSafeLayout } from '../src/source.js'
 import type { PruneProgress, PruneResult } from '../src/types.js'
@@ -57,8 +59,7 @@ export default class DbBackup extends BaseCommand {
       for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
         if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
         if (!(actions as readonly string[]).includes(this.action)) {
-          throw new BackupException(
-            'E_BACKUP_UNSAFE',
+          throw new E_BACKUP_UNSAFE(
             `--${flag} is only supported for ${formatFlagActionNames(actions)}`
           )
         }
@@ -80,7 +81,7 @@ export default class DbBackup extends BaseCommand {
           return
         case 'restore-prepare': {
           if (!this.target) {
-            throw new BackupException('E_BACKUP_UNSAFE', 'restore-prepare needs --target')
+            throw new E_BACKUP_UNSAFE('restore-prepare needs --target')
           }
           const staged = backup.prepareRestore({
             target: this.target,
@@ -102,13 +103,17 @@ export default class DbBackup extends BaseCommand {
           return
         }
         default:
-          throw new BackupException(
-            'E_BACKUP_UNSAFE',
-            `unknown action "${this.action}" (use ${ACTIONS.join(', ')})`
-          )
+          throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${ACTIONS.join(', ')})`)
       }
     } catch (error) {
-      const code = error instanceof BackupException ? `${error.code}: ` : ''
+      const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
+      const code = backupCode
+        ? `${backupCode}: `
+        : this.action === 'prune' &&
+            this.keep !== undefined &&
+            error instanceof InvalidArgumentsException
+          ? 'E_BACKUP_UNSAFE: '
+          : ''
       const message = error instanceof Error ? error.message : String(error)
       this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
       const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)
