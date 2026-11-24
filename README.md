@@ -151,8 +151,9 @@ format-1 manifest is tolerated for compatibility; it is not used to establish re
 ## Upgrading a database
 
 The `db:upgrade` Ace command (`node ace db:upgrade`) creates a verified pre-migration backup bundle
-of the primary connection's database, then runs
-`migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.
+of the primary connection's database, then runs the pending migrations with Lucid's migration
+runner, as `migration:run --force` would. Register `@adonisjs/lucid/commands` as well as this
+package's commands for schema generation.
 
 - The pre-migration backup bundle goes to `pre-migration` under the configured backup directory, or to
   `<database>.backups` beside the database when no backup directory is configured. These bundles
@@ -163,7 +164,9 @@ of the primary connection's database, then runs
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
   without a pre-migration backup bundle. Views or SQLite header metadata alone do not meet the table condition.
 - If the bundle cannot be written, nothing is migrated and the command exits 1 with
-  `Upgrade failed: …`. If a migration fails, the command exits with `migration:run`'s code.
+  `Upgrade failed: …`. If a migration fails, the command reports it as one `Upgrade failed: …`
+  line without a stack trace, exits 1 and keeps the migration error in `error` for a calling
+  command. A caller that reports its own failure line would print it twice.
 - The primary connection must use `better-sqlite3`.
 - Schema classes are generated with `schema:generate` only after every migration succeeds, and not
   in production. `--no-schema-generate` skips them.
