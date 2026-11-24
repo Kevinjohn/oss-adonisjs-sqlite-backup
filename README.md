@@ -11,7 +11,7 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release l
 archive's SHA-256.
 
 ```sh
-pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.4.3/kevinjohn-adonisjs-sqlite-backup-0.4.3.tgz
+pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.5.0/kevinjohn-adonisjs-sqlite-backup-0.5.0.tgz
 node ace configure @kevinjohn/adonisjs-sqlite-backup
 ```
 
@@ -106,11 +106,9 @@ unsafe root still throws from `checkSource()` or `prepareDirectory()` and stops 
 Do not run those calls before the application has booted. The root entry point and standalone
 utilities do not require a booted AdonisJS application. `defineConfig` checks that a supplied
 `connection` is a non-blank string, `directory` is a string (empty disables configured operations),
-and `requireWal` is boolean. In the unreleased API, invalid settings throw AdonisJS's
+and `requireWal` is boolean. Invalid settings throw AdonisJS's
 `InvalidArgumentsException`. Resolving the service without `config/backup.ts` throws AdonisJS's
-`RuntimeException` and includes the configure command. The v0.4.3 release installed above throws
-`BackupException` in both cases; see the
-[v0.4.3 configuration guide](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/v0.4.3/README.md#service-and-configuration).
+`RuntimeException` and includes the configure command.
 
 Configured preparation and prune refuse a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
@@ -250,9 +248,6 @@ verification finished. Inspect and remove only that chosen target before retryin
 refuses an existing target. The bundle remains the recovery source.
 
 ## Errors
-
-The per-code exception classes below are unreleased. If you installed the v0.4.3 tarball,
-see the [v0.4.3 error API](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/v0.4.3/README.md#errors).
 
 Import the `errors` namespace to recognise an expected backup failure by class or by its
 stable `code`. Each backup exception has status 500.

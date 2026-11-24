@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-24
+
 - `db:upgrade` reports a failed migration as one `Upgrade failed: …` line, without a stack trace,
   and still exits 1 with the migration error in `error`. It runs the pending migrations with
   Lucid's migration runner instead of a nested `migration:run`, whose own failure output Ace
@@ -9,7 +11,7 @@
   a failed one as `❯ error <file>`, and a database with nothing pending as `Already up to date`.
   A calling command should not report the copied `error` again; the README example does not.
 
-- Replace the `BackupException` and `errors.BackupException` exports with one exception class per
+- Breaking: replace the `BackupException` and `errors.BackupException` exports with one exception class per
   backup code. Match the corresponding class with `instanceof` or continue matching
   `error.code`. `BackupErrorCode` and `BACKUP_ERROR_CODES` remain available.
 
