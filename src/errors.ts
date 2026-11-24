@@ -442,18 +442,17 @@ export class BackupOperatorLockedException extends Exception {
 
 export const E_BACKUP_OPERATOR_LOCKED = BackupOperatorLockedException
 
-export class BackupOperatorSourceException extends Exception {
-  static code = 'E_BACKUP_OPERATOR_SOURCE' as const
+export class BackupSourceFileTypeException extends Exception {
+  static code = 'E_BACKUP_SOURCE_FILE_TYPE' as const
   static status = 500
-  static message = 'Operator commands require an existing on-disk database'
-  declare code: typeof BackupOperatorSourceException.code
+  declare code: typeof BackupSourceFileTypeException.code
 
-  constructor(options?: ErrorOptions) {
-    super(undefined, causeOnly(options))
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, causeOnly(options))
   }
 }
 
-export const E_BACKUP_OPERATOR_SOURCE = BackupOperatorSourceException
+export const E_BACKUP_SOURCE_FILE_TYPE = BackupSourceFileTypeException
 
 export class BackupPathMissingDotException extends Exception {
   static code = 'E_BACKUP_PATH_MISSING_DOT' as const
@@ -926,7 +925,6 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_OPERATOR_LOCKED.code,
   E_BACKUP_OPERATOR_POOL_INCOMPLETE.code,
   E_BACKUP_OPERATOR_RELEASE_REFUSED.code,
-  E_BACKUP_OPERATOR_SOURCE.code,
   E_BACKUP_PATH_MISSING_DOT.code,
   E_BACKUP_PATH_MISSING_DOT_DOT.code,
   E_BACKUP_PATH_NOT_DIRECTORY.code,
@@ -940,6 +938,7 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_SOURCE_CLIENT.code,
   E_BACKUP_SOURCE_CONNECTION.code,
   E_BACKUP_SOURCE_DRIVER_PATH.code,
+  E_BACKUP_SOURCE_FILE_TYPE.code,
   E_BACKUP_SOURCE_MISSING.code,
   E_BACKUP_SOURCE_NOT_FILE_BACKED.code,
   E_BACKUP_SOURCE_NOT_WAL.code,

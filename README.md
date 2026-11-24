@@ -154,8 +154,9 @@ for the newest recorded clock time. Concurrently removed publications are skippe
 with a missing or unreadable manifest reports `E_BACKUP_MANIFEST_UNREADABLE` and names the
 bundle. Malformed JSON reports `E_BACKUP_MANIFEST_JSON`. Valid JSON with an invalid manifest
 shape reports `E_BACKUP_MANIFEST_SHAPE`.
-Listing checks the creation metadata without reading or hashing the database; verify and restore
-preparation check the expected size and hash against the bytes. The READY marker, manifest and
+Listing checks the manifest shape, including a non-negative safe integer byte count and a
+64-character hexadecimal SHA-256 digest. Verify and restore preparation compare those values
+against the database bytes. The READY marker, manifest and
 database members must be regular files for recovery. A missing `sourceJournalMode` in an imported
 format-1 manifest is tolerated for compatibility; it is not used to establish recovery integrity.
 
@@ -305,7 +306,7 @@ Stopped-server operator helpers report these preconditions and failures:
 - `operatorDatabasePath` throws `InvalidArgumentsException` when confirmation is missing or the
   primary connection is incompatible. An unsupported filename throws
   `errors.E_BACKUP_SOURCE_NOT_FILE_BACKED` or `errors.E_BACKUP_SOURCE_URI`. A missing file throws
-  `errors.E_BACKUP_SOURCE_MISSING`. A non-regular entry throws `errors.E_BACKUP_OPERATOR_SOURCE`.
+  `errors.E_BACKUP_SOURCE_MISSING`. A non-regular entry throws `errors.E_BACKUP_SOURCE_FILE_TYPE`.
 - `withOperatorDatabase` throws `RuntimeException` for an overlapping call on the same
   `Database` or an inconsistent pool state. When exclusive acquisition meets `SQLITE_BUSY`, it
   throws `errors.E_BACKUP_OPERATOR_LOCKED` with the native error as `cause` and advises stopping the server

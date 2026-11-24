@@ -168,7 +168,8 @@ test.group('review findings', (group) => {
     mkdirSync(live)
     await assert.rejects(
       () => createBundle(prepared({ livePath: live, directory })),
-      /is not an existing file/
+      errors.E_BACKUP_SOURCE_FILE_TYPE,
+      /is not a regular file/
     )
     rmSync(live, { recursive: true })
 
@@ -426,7 +427,12 @@ test.group('rules the review found untested', (group) => {
       writeFileSync(join(directory, name, 'READY'), '')
       writeFileSync(
         join(directory, name, 'manifest.json'),
-        JSON.stringify({ format: 1, sha256: 'unused', createdAt: new Date(T).toISOString() })
+        JSON.stringify({
+          format: 1,
+          bytes: 0,
+          sha256: createHash('sha256').digest('hex'),
+          createdAt: new Date(T).toISOString(),
+        })
       )
     }
     prepared({ directory })

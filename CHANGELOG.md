@@ -31,7 +31,7 @@
   throw AdonisJS's `InvalidArgumentsException`. Missing backup configuration throws
   AdonisJS's `RuntimeException`. Operator guards use framework exceptions for invalid arguments
   and pool setup, source codes for unsupported filenames and missing files,
-  `errors.E_BACKUP_OPERATOR_SOURCE` for non-regular entries, and
+  `errors.E_BACKUP_SOURCE_FILE_TYPE` for non-regular entries, and
   `errors.E_BACKUP_OPERATOR_LOCKED` for exclusive-lock contention.
 - Add TypeScript examples to the public API documentation.
 

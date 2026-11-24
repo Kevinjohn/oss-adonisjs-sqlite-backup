@@ -157,7 +157,10 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
       manifest === null ||
       typeof manifest !== 'object' ||
       manifest.format !== 1 ||
+      !Number.isSafeInteger(manifest.bytes) ||
+      manifest.bytes < 0 ||
       typeof manifest.sha256 !== 'string' ||
+      !/^[0-9a-f]{64}$/i.test(manifest.sha256) ||
       typeof manifest.createdAt !== 'string' ||
       !Number.isFinite(Date.parse(manifest.createdAt)) ||
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
@@ -192,7 +195,7 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
     if (stat.size !== manifest.bytes) {
       throw new E_BACKUP_SIZE_MISMATCH(`${label}: database size does not match manifest`)
     }
-    matches = hashFileSha256(path) === manifest.sha256
+    matches = hashFileSha256(path) === manifest.sha256.toLowerCase()
   } catch (cause) {
     if (cause instanceof E_BACKUP_DATABASE_FILE_TYPE || cause instanceof E_BACKUP_SIZE_MISMATCH)
       throw cause

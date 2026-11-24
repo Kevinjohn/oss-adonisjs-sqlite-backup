@@ -8,7 +8,8 @@ import {
   E_BACKUP_OPERATOR_POOL_INCOMPLETE,
   E_BACKUP_OPERATOR_HANDLE_OPEN,
   E_BACKUP_OPERATOR_LOCKED,
-  E_BACKUP_OPERATOR_SOURCE,
+  E_BACKUP_PATH_NOT_DIRECTORY,
+  E_BACKUP_SOURCE_FILE_TYPE,
   E_BACKUP_SOURCE_MISSING,
   E_BACKUP_SOURCE_NOT_FILE_BACKED,
   E_BACKUP_SOURCE_URI,
@@ -23,7 +24,8 @@ import { normalizeConfiguredSqliteFilename } from './source.js'
  * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
  * @throws E_BACKUP_SOURCE_NOT_FILE_BACKED or E_BACKUP_SOURCE_URI for an unsupported filename.
  * @throws E_BACKUP_SOURCE_MISSING when the file is absent.
- * @throws E_BACKUP_OPERATOR_SOURCE when the entry is not a regular file.
+ * @throws E_BACKUP_PATH_NOT_DIRECTORY when the filename traverses a non-directory.
+ * @throws E_BACKUP_SOURCE_FILE_TYPE when the entry is not a regular file.
  *
  * @example
  * ```ts
@@ -51,9 +53,15 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
   const message = 'Operator commands require an existing on-disk database'
   if (!path || path === ':memory:') throw new E_BACKUP_SOURCE_NOT_FILE_BACKED(message)
   if (/^file:/i.test(path)) throw new E_BACKUP_SOURCE_URI(message)
-  const stat = lstatSync(path, { throwIfNoEntry: false })
+  let stat
+  try {
+    stat = lstatSync(path, { throwIfNoEntry: false })
+  } catch (cause) {
+    if ((cause as NodeJS.ErrnoException).code !== 'ENOTDIR') throw cause
+    throw new E_BACKUP_PATH_NOT_DIRECTORY(`path ${path} traverses a non-directory`, { cause })
+  }
   if (!stat) throw new E_BACKUP_SOURCE_MISSING(message)
-  if (!stat.isFile()) throw new E_BACKUP_OPERATOR_SOURCE()
+  if (!stat.isFile()) throw new E_BACKUP_SOURCE_FILE_TYPE(message)
   return path
 }
 

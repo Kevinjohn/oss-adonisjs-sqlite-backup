@@ -6,6 +6,7 @@ import {
   E_BACKUP_SOURCE_CLIENT,
   E_BACKUP_SOURCE_CONNECTION,
   E_BACKUP_SOURCE_DRIVER_PATH,
+  E_BACKUP_SOURCE_FILE_TYPE,
   E_BACKUP_SOURCE_MISSING,
   E_BACKUP_SOURCE_NOT_FILE_BACKED,
   E_BACKUP_SOURCE_URI,
@@ -90,9 +91,9 @@ export function isWithin(parent: string, child: string): boolean {
  */
 export function assertSafeLayout(livePath: string, directory: string): void {
   const stat = statSync(livePath, { throwIfNoEntry: false })
-  if (!stat?.isFile()) {
-    throw new E_BACKUP_SOURCE_MISSING(`live database ${livePath} is not an existing file`)
-  }
+  if (!stat) throw new E_BACKUP_SOURCE_MISSING(`live database ${livePath} is not an existing file`)
+  if (!stat.isFile())
+    throw new E_BACKUP_SOURCE_FILE_TYPE(`live database ${livePath} is not a regular file`)
   assertSourceOutsideDirectory(livePath, directory)
 }
 

@@ -596,6 +596,12 @@ test.group('createBundle', (group) => {
     } catch (error) {
       assert.equal(code(error), 'E_BACKUP_SOURCE_MISSING')
     }
+    const nonFile = join(root, 'source-directory')
+    mkdirSync(nonFile)
+    await assert.rejects(
+      () => createBundle(prepared({ livePath: nonFile, directory })),
+      errors.E_BACKUP_SOURCE_FILE_TYPE
+    )
     assert.isFalse(existsSync(join(root, 'missing.db')))
   })
 })

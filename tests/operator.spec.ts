@@ -74,7 +74,7 @@ test.group('operatorDatabasePath', (group) => {
       [' :memory: ', errors.E_BACKUP_SOURCE_NOT_FILE_BACKED],
       [' ', errors.E_BACKUP_SOURCE_NOT_FILE_BACKED],
       [join(root, 'missing.db'), errors.E_BACKUP_SOURCE_MISSING],
-      [join(root, 'directory.db'), errors.E_BACKUP_OPERATOR_SOURCE],
+      [join(root, 'directory.db'), errors.E_BACKUP_SOURCE_FILE_TYPE],
       ['file:memory.db', errors.E_BACKUP_SOURCE_URI],
     ] as const) {
       assert.throws(
@@ -91,6 +91,16 @@ test.group('operatorDatabasePath', (group) => {
         ),
       errors.E_BACKUP_SOURCE_NOT_FILE_BACKED,
       'Operator commands require an existing on-disk database'
+    )
+  })
+
+  test('reports a non-directory path segment as a source path error', ({ assert }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    assert.throws(
+      () => operatorDatabasePath(configured(sqlite(join(live, 'nested.db'))), true),
+      errors.E_BACKUP_PATH_NOT_DIRECTORY,
+      /traverses a non-directory/
     )
   })
 })

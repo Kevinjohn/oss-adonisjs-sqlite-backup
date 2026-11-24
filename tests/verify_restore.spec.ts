@@ -143,6 +143,29 @@ test.group('verify and prepareRestore', (group) => {
     }
   })
 
+  test('verify refuses malformed size and checksum metadata on an intact database', ({
+    assert,
+  }) => {
+    const file = join(path, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    chmodSync(file, 0o600)
+    for (const fields of [
+      { bytes: undefined },
+      { bytes: String(manifest.bytes) },
+      { bytes: -1 },
+      { bytes: 1.5 },
+      { bytes: Number.MAX_SAFE_INTEGER + 1 },
+      { sha256: undefined },
+      { sha256: 'short' },
+      { sha256: 'g'.repeat(64) },
+    ]) {
+      writeFileSync(file, JSON.stringify({ ...manifest, ...fields }))
+      assert.throws(() => verifyBundle(directory, name), errors.E_BACKUP_MANIFEST_SHAPE)
+    }
+    writeFileSync(file, JSON.stringify({ ...manifest, sha256: manifest.sha256.toUpperCase() }))
+    assert.equal(verifyBundle(directory, name).name, name)
+  })
+
   test('verify reports a size mismatch even when the stored checksum is correct', ({ assert }) => {
     const file = join(path, 'manifest.json')
     const manifest = JSON.parse(readFileSync(file, 'utf8'))
