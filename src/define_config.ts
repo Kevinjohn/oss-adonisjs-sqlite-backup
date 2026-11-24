@@ -1,27 +1,33 @@
-import { BackupException } from './errors.js'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import type { BackupConfig, BackupConfigInput } from './types.js'
 import { assertLockTimeout } from './lock.js'
 
-/** Validate `config/backup.ts` and apply defaults. */
+/**
+ * Validate `config/backup.ts` and apply defaults.
+ *
+ * @example
+ * ```ts
+ * import { defineConfig } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * export default defineConfig({ directory: 'storage/backups', keep: 14, requireWal: true })
+ * ```
+ */
 export function defineConfig(input: BackupConfigInput): BackupConfig {
   if (
     input.connection !== undefined &&
     (typeof input.connection !== 'string' || !input.connection.trim())
   ) {
-    throw new BackupException('E_BACKUP_SOURCE', 'backup connection must be a non-empty string')
+    throw new InvalidArgumentsException('backup connection must be a non-empty string')
   }
   if (input.directory !== undefined && typeof input.directory !== 'string') {
-    throw new BackupException('E_BACKUP_UNSAFE', 'backup directory must be a string')
+    throw new InvalidArgumentsException('backup directory must be a string')
   }
   if (input.requireWal !== undefined && typeof input.requireWal !== 'boolean') {
-    throw new BackupException('E_BACKUP_SOURCE', 'backup requireWal must be a boolean')
+    throw new InvalidArgumentsException('backup requireWal must be a boolean')
   }
   const keep = input.keep ?? 7
   if (!Number.isInteger(keep) || keep < 1) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
-      `backup keep must be an integer >= 1 (got ${keep})`
-    )
+    throw new InvalidArgumentsException(`backup keep must be an integer >= 1 (got ${keep})`)
   }
   const lockTimeoutMs = input.lockTimeoutMs ?? 0
   assertLockTimeout(lockTimeoutMs)

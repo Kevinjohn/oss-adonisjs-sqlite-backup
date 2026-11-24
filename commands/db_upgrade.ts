@@ -1,4 +1,5 @@
 import { BaseCommand, flags } from '@adonisjs/core/ace'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { MigrationRunner } from '@adonisjs/lucid/migration'
 import { createBundle } from '../src/bundles.js'
@@ -30,7 +31,7 @@ export default class DbUpgrade extends BaseCommand {
       const db = await this.app.container.make('lucid.db')
       const connectionConfig = db.getRawConnection(db.primaryConnectionName)?.config
       if (connectionConfig?.client !== 'better-sqlite3') {
-        throw new Error('db:upgrade requires the configured SQLite connection')
+        throw new InvalidArgumentsException('db:upgrade requires the configured SQLite connection')
       }
       const dbPath = normalizeConfiguredSqliteFilename(
         (connectionConfig.connection as { filename: string }).filename,
@@ -44,7 +45,7 @@ export default class DbUpgrade extends BaseCommand {
       // An empty or in-memory database has nothing to roll back to.
       if (dbPath !== ':memory:' && existing) {
         if (!dbPath || /^file:/i.test(dbPath)) {
-          throw new Error('db:upgrade requires a file-backed SQLite connection')
+          throw new InvalidArgumentsException('db:upgrade requires a file-backed SQLite connection')
         }
         const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
         const directory = preMigrationBackupDirectory(dbPath, config?.directory)
@@ -85,7 +86,9 @@ export default class DbUpgrade extends BaseCommand {
         }
       }
     } catch (error) {
-      this.logger.error(`Upgrade failed: ${String(error)}`)
+      const detail =
+        error instanceof InvalidArgumentsException ? `Error: ${error.message}` : String(error)
+      this.logger.error(`Upgrade failed: ${detail}`)
       this.exitCode = 1
     }
   }

@@ -1,6 +1,7 @@
 import {
   configure,
   defineConfig,
+  errors,
   SqliteBackup,
   createBundle,
   acquireLock,
@@ -31,6 +32,13 @@ export function publicTypes(
   const lock: DirectoryLock = acquireLock('/archive', 0)
   const rootLock: RootLock = lock
   const service: SqliteBackup = backup
+  try {
+    service.verify('bak-utc-20000101-000000-000')
+  } catch (error) {
+    if (!(error instanceof errors.E_BACKUP_NOT_FOUND)) throw error
+    const missingCode: 'E_BACKUP_NOT_FOUND' = error.code
+    void missingCode
+  }
   void createBundle({ livePath: '/live.db', directory: '/archive' })
   void createBundle({ source: { database: rootDatabase }, directory: '/archive' })
   void service.create({ database })

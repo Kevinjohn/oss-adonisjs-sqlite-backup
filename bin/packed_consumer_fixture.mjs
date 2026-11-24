@@ -113,6 +113,13 @@ try {
   assert.equal(importedService, service)
   assert.equal(service.config.keep, 12)
   assert.equal(service.list().length, 1)
+  assert.throws(
+    () => service.verify('bak-utc-20000101-000000-000'),
+    (error) =>
+      error instanceof backupPackage.errors.E_BACKUP_NOT_FOUND &&
+      error.code === 'E_BACKUP_NOT_FOUND' &&
+      error.status === 500
+  )
   assert(existsSync(join(service.list()[0].path, 'db.sqlite')))
   await db.table('items').insert({ body: 'live only' })
   const target = join(root, 'staged.db')

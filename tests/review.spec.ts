@@ -1,3 +1,4 @@
+import { BACKUP_ERROR_CODES, errors } from '../index.js'
 import { prepared } from './helpers.js'
 /**
  * Independent review findings (F1-F11) and rules the review found untested (M1-M16).
@@ -42,10 +43,9 @@ const readBackupErrorCode = async (fn: () => unknown) => {
   try {
     await fn()
   } catch (error) {
-    const e = error as { code?: string; name?: string }
-    return e.name === 'BackupException' || e.constructor?.name === 'BackupException'
-      ? e.code
-      : `raw:${e.code}`
+    const code = (error as { code?: string }).code
+    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
+    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
   }
   return 'no error'
 }
@@ -156,7 +156,7 @@ test.group('review findings', (group) => {
     assert.equal(hashFileSha256(big), expected.digest('hex'))
   }).timeout(120_000)
 
-  test('F5: raw errors become BackupExceptions; a damaged lock file is recovered', async ({
+  test('F5: source failures use errors.E_BACKUP_SOURCE; a damaged lock file is recovered', async ({
     assert,
   }) => {
     writeFileSync(live, 'x'.repeat(8192))

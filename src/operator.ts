@@ -1,20 +1,34 @@
 import { existsSync, lstatSync } from 'node:fs'
+import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import type { Database } from '@adonisjs/lucid/database'
+import { E_BACKUP_LOCKED, E_BACKUP_SOURCE } from './errors.js'
 import type { NativeDatabase } from './native.js'
 import { normalizeConfiguredSqliteFilename } from './source.js'
 
 /**
  * Checks that a stopped-server operator command may open the primary connection, and returns the
  * database file it uses. Call it before opening any connection.
- * @throws Error `Refusing without --confirm-server-stopped` when the operator has not confirmed.
- * @throws Error when the primary connection is not better-sqlite3 with a pool of one.
- * @throws Error when the database is in memory or is not an existing regular file.
+ * @throws InvalidArgumentsException `Refusing without --confirm-server-stopped` when the operator has not confirmed.
+ * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
+ * @throws E_BACKUP_SOURCE when the database is in memory or is not an existing regular file.
+ *
+ * @example
+ * ```ts
+ * import { operatorDatabasePath } from '@kevinjohn/adonisjs-sqlite-backup'
+ * import db from '@adonisjs/lucid/services/db'
+ *
+ * // Run after the operator confirms that the server is stopped.
+ * const livePath = operatorDatabasePath(db, true)
+ * ```
  */
 export function operatorDatabasePath(db: Database, confirmServerStopped: boolean): string {
-  if (!confirmServerStopped) throw new Error('Refusing without --confirm-server-stopped')
+  if (!confirmServerStopped)
+    throw new InvalidArgumentsException('Refusing without --confirm-server-stopped')
   const config = db.getRawConnection(db.primaryConnectionName)?.config
   if (config?.client !== 'better-sqlite3' || config.pool?.max !== 1) {
-    throw new Error('Operator commands require the configured single-connection SQLite pool')
+    throw new InvalidArgumentsException(
+      'Operator commands require the configured single-connection SQLite pool'
+    )
   }
   const configuredFilename = (config.connection as { filename?: unknown } | undefined)?.filename
   const path =
@@ -28,7 +42,7 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
     !existsSync(path) ||
     !lstatSync(path).isFile()
   ) {
-    throw new Error('Operator commands require an existing on-disk database')
+    throw new E_BACKUP_SOURCE('Operator commands require an existing on-disk database')
   }
   return path
 }
@@ -64,12 +78,26 @@ const activeOperators = new WeakSet<Database>()
  * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
  * both fail, AggregateError contains the work failure first and cleanup failures in observation
  * order.
+ *
+ * @example
+ * ```ts
+ * import { createBundle, operatorDatabasePath, prepareDirectory, withOperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
+ * import db from '@adonisjs/lucid/services/db'
+ *
+ * // Run after the operator confirms that the server is stopped.
+ * operatorDatabasePath(db, true)
+ * const bundle = await withOperatorDatabase(db, async (database) => {
+ *   prepareDirectory('storage/backups')
+ *   return createBundle({ source: { database }, directory: 'storage/backups' })
+ * })
+ * ```
  */
 export async function withOperatorDatabase<T>(
   db: Database,
   run: (connection: NativeDatabase) => Promise<T>
 ): Promise<T> {
-  if (activeOperators.has(db)) throw new Error('An operator command is already using this database')
+  if (activeOperators.has(db))
+    throw new RuntimeException('An operator command is already using this database')
   activeOperators.add(db)
   try {
     return await runOperatorDatabase(db, run)
@@ -96,7 +124,7 @@ async function runOperatorDatabase<T>(
   try {
     client = db.connection().getWriteClient().client as unknown as Client
     owner = client.pool
-    if (!owner) throw new Error('Operator command requires an initialized SQLite pool')
+    if (!owner) throw new RuntimeException('Operator command requires an initialized SQLite pool')
     handle = await client.acquireConnection()
     handle.pragma('busy_timeout = 0')
     handle.pragma('locking_mode = EXCLUSIVE')
@@ -107,9 +135,12 @@ async function runOperatorDatabase<T>(
         error instanceof Error &&
         /^SQLITE_BUSY(?:_|$)/.test((error as Error & { code?: string }).code ?? '')
       ) {
-        throw new Error('Another process holds this database; stop the server and retry', {
-          cause: error,
-        })
+        throw new E_BACKUP_LOCKED(
+          'Another process holds this database; stop the server and retry',
+          {
+            cause: error,
+          }
+        )
       }
       throw error
     }
@@ -125,7 +156,10 @@ async function runOperatorDatabase<T>(
       propagateCreateError: true,
       create: async () => {
         if (created)
-          throw validationFailure ?? new Error('Operator database handle is no longer available')
+          throw (
+            validationFailure ??
+            new RuntimeException('Operator database handle is no longer available')
+          )
         created = true
         return pinned
       },
@@ -136,9 +170,12 @@ async function runOperatorDatabase<T>(
         try {
           return await validate(candidate)
         } catch (error) {
-          validationFailure = new Error('Operator database handle is no longer available', {
-            cause: error,
-          })
+          validationFailure = new RuntimeException(
+            'Operator database handle is no longer available',
+            {
+              cause: error,
+            }
+          )
           return false
         }
       },
@@ -160,7 +197,7 @@ async function runOperatorDatabase<T>(
   if (handle && owner) {
     try {
       if (!owner.release(handle))
-        errors.push(new Error('Operator database owner refused the handle release'))
+        errors.push(new RuntimeException('Operator database owner refused the handle release'))
     } catch (error) {
       errors.push(error)
     }
@@ -230,7 +267,7 @@ async function runOperatorDatabase<T>(
       const pending = record.pools.filter((item) => !item.completed)
       if (pending.length > record.disconnectCount) {
         errors.push(
-          new Error(
+          new RuntimeException(
             `Operator connection ${record.name} pool cleanup incomplete: ${pending.flatMap((item) => item.roles).join(', ')}`
           )
         )
@@ -240,7 +277,7 @@ async function runOperatorDatabase<T>(
   }
   if (handle?.open) {
     if (!primaryCleanupObserved)
-      errors.push(new Error('Operator database handle remained open after pool cleanup'))
+      errors.push(new RuntimeException('Operator database handle remained open after pool cleanup'))
     try {
       handle.close()
     } catch (error) {

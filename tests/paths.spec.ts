@@ -1,3 +1,4 @@
+import { BACKUP_ERROR_CODES, errors } from '../index.js'
 import { prepared } from './helpers.js'
 /**
  * Phase 7: `..` is resolved against the real folder on disk, as SQLite and the kernel do, never
@@ -31,8 +32,9 @@ const readBackupErrorCode = async (fn: () => unknown) => {
   try {
     await fn()
   } catch (error) {
-    const e = error as { code?: string; constructor?: { name?: string } }
-    return e.constructor?.name === 'BackupException' ? e.code : `raw:${e.code}`
+    const code = (error as { code?: string }).code
+    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
+    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
   }
   return 'no error'
 }

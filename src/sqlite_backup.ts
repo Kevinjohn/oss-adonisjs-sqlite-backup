@@ -1,6 +1,6 @@
 import { createBundle, listBundles, verifyBundle } from './bundles.js'
 import { prepareDirectory } from './directory.js'
-import { BackupException } from './errors.js'
+import { E_BACKUP_DISABLED, E_BACKUP_SOURCE } from './errors.js'
 import type { NativeDatabase } from './native.js'
 import { resolveFilesystemPath } from './paths.js'
 import { pruneBundles } from './prune.js'
@@ -8,7 +8,24 @@ import { prepareRestore } from './restore.js'
 import { assertSourceOutsideDirectory, openOwnedSource, resolveSqliteSource } from './source.js'
 import type { BackupConfig, LucidDatabaseConfig } from './types.js'
 
-/** Backup service bound in the container as `sqlite.backup`. */
+/**
+ * Backup service bound in the container as `sqlite.backup`.
+ *
+ * @example
+ * ```ts
+ * import { defineConfig, SqliteBackup } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const backup = new SqliteBackup(defineConfig({ directory: 'storage/backups' }), {
+ *   connection: 'orchard',
+ *   connections: {
+ *     orchard: { client: 'better-sqlite3', connection: { filename: 'storage/orchard.sqlite' } },
+ *   },
+ * })
+ * backup.checkSource()
+ * backup.prepareDirectory()
+ * const bundle = await backup.create()
+ * ```
+ */
 export class SqliteBackup {
   constructor(
     readonly config: BackupConfig,
@@ -17,17 +34,31 @@ export class SqliteBackup {
 
   private requireBackupDirectory(override?: string): string {
     const directory = override ?? this.config.directory
-    if (!directory) throw new BackupException('E_BACKUP_DISABLED', 'backups are disabled')
+    if (!directory) throw new E_BACKUP_DISABLED()
     return directory
   }
 
-  /** Live SQLite path, read from Lucid's connection config on every call. */
+  /**
+   * Live SQLite path, read from Lucid’s connection config on every call.
+   *
+   * @example
+   * ```ts
+   * const livePath = backup.livePath()
+   * ```
+   */
   livePath(): string {
     this.requireBackupDirectory()
     return resolveSqliteSource(this.database, this.config.connection)
   }
 
-  /** Fail startup if the configured source cannot be opened, without creating a bundle. */
+  /**
+   * Fail startup if the configured source cannot be opened, without creating a bundle.
+   *
+   * @example
+   * ```ts
+   * backup.checkSource()
+   * ```
+   */
   checkSource(): void {
     const path = this.livePath()
     try {
@@ -38,20 +69,35 @@ export class SqliteBackup {
         source.close()
       }
     } catch (cause) {
-      if (cause instanceof BackupException) throw cause
-      throw new BackupException('E_BACKUP_SOURCE', `live database ${path} cannot be read`, {
+      if (cause instanceof E_BACKUP_SOURCE) throw cause
+      throw new E_BACKUP_SOURCE(`live database ${path} cannot be read`, {
         cause,
       })
     }
   }
 
-  /** Prepare the root after checking it does not contain the configured live database. */
+  /**
+   * Prepare the root after checking it does not contain the configured live database.
+   *
+   * @example
+   * ```ts
+   * backup.prepareDirectory()
+   * ```
+   */
   prepareDirectory(): void {
     const directory = resolveFilesystemPath(this.requireBackupDirectory())
     this.rejectLiveDatabaseInside(directory)
     prepareDirectory(directory)
   }
 
+  /**
+   * Copy the live database and publish a verified backup bundle.
+   *
+   * @example
+   * ```ts
+   * const bundle = await backup.create()
+   * ```
+   */
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
     const directory = this.requireBackupDirectory()
     const connection = this.config.connection ?? this.database?.connection
@@ -69,14 +115,38 @@ export class SqliteBackup {
     })
   }
 
+  /**
+   * List published bundles in creation order, oldest first.
+   *
+   * @example
+   * ```ts
+   * const bundles = backup.list()
+   * ```
+   */
   list(directory?: string) {
     return listBundles(this.requireBackupDirectory(directory))
   }
 
+  /**
+   * Verify a published bundle, defaulting to the newest.
+   *
+   * @example
+   * ```ts
+   * const bundle = backup.verify()
+   * ```
+   */
   verify(name?: string, directory?: string) {
     return verifyBundle(this.requireBackupDirectory(directory), name)
   }
 
+  /**
+   * Stage a verified copy for recovery at an unused path.
+   *
+   * @example
+   * ```ts
+   * const staged = backup.prepareRestore({ target: 'storage/recovered.sqlite' })
+   * ```
+   */
   prepareRestore(input: { target: string; name?: string; directory?: string }) {
     return prepareRestore({
       ...input,
@@ -91,11 +161,19 @@ export class SqliteBackup {
       livePath = resolveSqliteSource(this.database, this.config.connection)
     } catch (error) {
       // A service can create backups from borrowed handles without a configured file source.
-      if (!(error instanceof BackupException) || error.code !== 'E_BACKUP_SOURCE') throw error
+      if (!(error instanceof E_BACKUP_SOURCE)) throw error
     }
     if (livePath !== undefined) assertSourceOutsideDirectory(livePath, directory)
   }
 
+  /**
+   * Remove unfinished bundles and retain the newest published bundles.
+   *
+   * @example
+   * ```ts
+   * const result = backup.prune({ keep: 7 })
+   * ```
+   */
   prune(options: { keep?: number } = {}) {
     const directory = resolveFilesystemPath(this.requireBackupDirectory())
     this.rejectLiveDatabaseInside(directory)

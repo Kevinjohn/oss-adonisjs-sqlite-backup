@@ -1,15 +1,17 @@
+import { errors } from '../index.js'
 import { prepared } from './helpers.js'
 /** Every publish step is fsynced in order: file, then its directory, before the next step. */
 import { test } from '@japa/runner'
 import fs, { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
-import { join, relative } from 'node:path'
-import { createBundle, listBundles } from '../src/bundles.js'
+import { dirname, join, relative } from 'node:path'
+import { createBundle, listBundleDirectoryNames, listBundles } from '../src/bundles.js'
 import { prepareDirectory } from '../src/directory.js'
 import { writeAll } from '../src/fs.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { pruneBundles } from '../src/prune.js'
 import { prepareRestore } from '../src/restore.js'
+import { MANIFEST } from '../src/names.js'
 import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
 
 test.group('durability', (group) => {
@@ -44,6 +46,54 @@ test.group('durability', (group) => {
       'sync b/BUNDLE',
       'sync b',
     ])
+  })
+
+  test('a manifest write that stalls after a short write never publishes a bundle', async ({
+    assert,
+  }) => {
+    const livePath = join(root, 'live.db')
+    const directory = join(root, 'b')
+    makeLiveDatabase(livePath).close()
+    const input = prepared({ livePath, directory })
+    const originalWrite = fs.writeSync
+    const offsets: number[] = []
+    let manifestPath: string | undefined
+
+    internalHooks.step = (step, path) => {
+      if (step === 'create:checked') manifestPath = join(dirname(path), MANIFEST)
+    }
+    fs.writeSync = (
+      fd: number,
+      data: string | NodeJS.ArrayBufferView,
+      ...args: unknown[]
+    ): number => {
+      const manifest = manifestPath && statSync(manifestPath, { throwIfNoEntry: false })
+      if (manifest && Buffer.isBuffer(data)) {
+        const file = fs.fstatSync(fd)
+        if (file.ino === manifest.ino && file.dev === manifest.dev) {
+          const offset = args[0] as number
+          offsets.push(offset)
+          return offset === 0 ? originalWrite(fd, data, offset, 5) : 0
+        }
+      }
+      return Reflect.apply(originalWrite, fs, [fd, data, ...args])
+    }
+    syncBuiltinESMExports()
+    try {
+      await assert.rejects(
+        () => createBundle(input),
+        errors.E_BACKUP_INVALID,
+        /write stopped after 5 of [0-9]+ bytes/
+      )
+      assert.deepEqual(offsets, [0, 5])
+      assert.deepEqual(listBundleDirectoryNames(directory), [])
+    } finally {
+      delete internalHooks.step
+      fs.writeSync = originalWrite
+      syncBuiltinESMExports()
+    }
+    await createBundle(input)
+    assert.lengthOf(listBundles(directory), 1)
   })
 
   test('a failed READY removal leaves the bundle listed and reports the cleanup error', async ({
@@ -169,6 +219,10 @@ test.group('durability', (group) => {
       return Math.min(3, buffer.length - offset)
     })
     assert.deepEqual(chunks, ['012', '345', '678', '9'])
-    assert.throws(() => writeAll(7, data, () => 0), /write stopped after 0 of 10 bytes/)
+    assert.throws(
+      () => writeAll(7, data, (_fd, _buffer, offset) => (offset === 0 ? 3 : 0)),
+      errors.E_BACKUP_INVALID,
+      /write stopped after 3 of 10 bytes/
+    )
   })
 })

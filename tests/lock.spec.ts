@@ -1,4 +1,6 @@
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
+import { errors } from '../index.js'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 import { linkSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -8,7 +10,11 @@ import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
 
 test.group('Directory lock', () => {
   test('rejects unsupported timeout before touching the lock path', ({ assert }) => {
-    assert.throws(() => acquireLock('/missing/lock/root', 2_147_483_648), /2147483647/)
+    assert.throws(
+      () => acquireLock('/missing/lock/root', 2_147_483_648),
+      InvalidArgumentsException,
+      /2147483647/
+    )
   })
 
   test('damaged multiply linked lock cannot truncate its alias', ({ assert }) => {
@@ -28,7 +34,7 @@ test.group('Directory lock', () => {
     const { root, cleanup } = createTemporaryRoot()
     try {
       const first = acquireLock(root)
-      assert.throws(() => acquireLock(root), /locked/)
+      assert.throws(() => acquireLock(root), errors.E_BACKUP_LOCKED, /locked/)
       first.release()
       first.release()
       acquireLock(root).release()
@@ -370,7 +376,7 @@ test.group('Directory lock', () => {
       writeFileSync(join(root, '.backup.lock'), 'x'.repeat(4096))
       const held = acquireLock(root)
       assert.equal(statSync(join(root, '.backup.lock')).size, 0)
-      assert.throws(() => acquireLock(root), /locked/)
+      assert.throws(() => acquireLock(root), errors.E_BACKUP_LOCKED, /locked/)
       held.release()
     } finally {
       cleanup()

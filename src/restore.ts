@@ -2,7 +2,7 @@ import { chmodSync, constants, copyFileSync, lstatSync, rmSync, statSync } from 
 import { dirname, join } from 'node:path'
 import { assertMatchesManifest, readManifest, requireSelectedBundle } from './bundles.js'
 import { assertDirectory } from './directory.js'
-import { BackupException } from './errors.js'
+import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
 import { DATABASE, READY } from './names.js'
@@ -17,6 +17,17 @@ const existsIncludingDanglingSymlink = (path: string) =>
  * Stage a verified copy of a bundle at `target`. Never touches the live database and never swaps
  * it in: stopping the app and switching files is host policy. Lock-free, so it cannot starve
  * creates; a bundle pruned mid-copy fails the checksum and nothing is left behind.
+ *
+ * @example
+ * ```ts
+ * import { prepareRestore } from '@kevinjohn/adonisjs-sqlite-backup'
+ *
+ * const staged = prepareRestore({
+ *   directory: 'storage/backups',
+ *   livePath: 'storage/orchard.sqlite',
+ *   target: 'storage/recovered.sqlite',
+ * })
+ * ```
  */
 export function prepareRestore(input: {
   directory: string
@@ -27,15 +38,13 @@ export function prepareRestore(input: {
   // resolveFilesystemPath drops a trailing slash after a missing segment, and the as-given check below would
   // follow a dangling symlink through it.
   if (input.target.endsWith('/')) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
+    throw new E_BACKUP_UNSAFE(
       `restore target ${input.target} names a folder; give the file to create`
     )
   }
   const target = resolveFilesystemPath(input.target)
   if (normalizeConfiguredSqliteFilename(target, 'better-sqlite3') !== target) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
+    throw new E_BACKUP_UNSAFE(
       'restore target changes when opened by the SQLite verification driver'
     )
   }
@@ -43,26 +52,20 @@ export function prepareRestore(input: {
   const directory = resolveFilesystemPath(input.directory)
   assertDirectory(directory, { requirePrivateRoot: true })
   if ([livePath, `${livePath}-wal`, `${livePath}-shm`, `${livePath}-journal`].includes(target)) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
-      'restore target is the live database or one of its sidecars'
-    )
+    throw new E_BACKUP_UNSAFE('restore target is the live database or one of its sidecars')
   }
   // Checked as given too: a dangling symlink at the target is present even though its end is not.
   const names = [target, input.target].flatMap((t) => [t, `${t}-wal`, `${t}-shm`, `${t}-journal`])
   for (const path of names) {
     if (existsIncludingDanglingSymlink(path)) {
-      throw new BackupException('E_BACKUP_UNSAFE', `restore target ${path} already exists`)
+      throw new E_BACKUP_UNSAFE(`restore target ${path} already exists`)
     }
   }
   if (!statSync(dirname(target), { throwIfNoEntry: false })?.isDirectory()) {
-    throw new BackupException(
-      'E_BACKUP_UNSAFE',
-      `restore target folder ${dirname(target)} is missing`
-    )
+    throw new E_BACKUP_UNSAFE(`restore target folder ${dirname(target)} is missing`)
   }
   if (isWithin(directory, target)) {
-    throw new BackupException('E_BACKUP_UNSAFE', `restore target ${target} is in the backup folder`)
+    throw new E_BACKUP_UNSAFE(`restore target ${target} is in the backup folder`)
   }
   const bundle = requireSelectedBundle(directory, input.name)
   const manifest = readManifest(bundle)
@@ -71,26 +74,23 @@ export function prepareRestore(input: {
   try {
     const sourceStat = lstatSync(source, { throwIfNoEntry: false })
     if (sourceStat && !sourceStat.isFile()) {
-      throw new BackupException(
-        'E_BACKUP_INVALID',
-        `bundle ${bundle.name} database is not a regular file`
-      )
+      throw new E_BACKUP_INVALID(`bundle ${bundle.name} database is not a regular file`)
     }
     copyFileSync(source, target, constants.COPYFILE_EXCL)
   } catch (cause) {
     const code = (cause as NodeJS.ErrnoException).code
     /* c8 ignore next 5 -- race: the target appeared between the existence check and the copy */
     if (code === 'EEXIST') {
-      throw new BackupException('E_BACKUP_UNSAFE', `restore target ${target} already exists`, {
+      throw new E_BACKUP_UNSAFE(`restore target ${target} already exists`, {
         cause,
       })
     }
     // Only a vanished publication is missing. A READY bundle with a missing database is damaged.
     if (code === 'ENOENT' && !existsIncludingDanglingSymlink(join(bundle.path, READY))) {
-      throw new BackupException('E_BACKUP_NOT_FOUND', `bundle ${bundle.name} was pruned`, { cause })
+      throw new E_BACKUP_NOT_FOUND(`bundle ${bundle.name} was pruned`, { cause })
     }
     if (code === 'ENOENT' && !existsIncludingDanglingSymlink(source)) {
-      throw new BackupException('E_BACKUP_INVALID', `bundle ${bundle.name} database is missing`, {
+      throw new E_BACKUP_INVALID(`bundle ${bundle.name} database is missing`, {
         cause,
       })
     }
@@ -119,7 +119,7 @@ export function prepareRestore(input: {
       resolvedTargetPath !== target ||
       resolveFilesystemPath(target) !== target
     ) {
-      throw new BackupException('E_BACKUP_UNSAFE', `restore target ${target} moved during the copy`)
+      throw new E_BACKUP_UNSAFE(`restore target ${target} moved during the copy`)
     }
     chmodSync(target, 0o600)
     assertMatchesManifest(target, manifest, `staged copy of ${bundle.name}`)
