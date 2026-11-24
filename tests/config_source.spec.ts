@@ -67,24 +67,18 @@ test.group('config and source resolution', () => {
   })
 
   test('non-file and non-SQLite connections are refused', ({ assert }) => {
-    for (const config of [
-      undefined,
-      sqlite('/a.db', 'pg'),
-      sqlite(':memory:'),
-      sqlite(''),
-      sqlite(undefined),
-      sqlite('file:/a.db?mode=memory'),
-      sqlite('  :memory:  '),
-      sqlite('   '),
-      sqlite('  file:/a.db?mode=memory  '),
-    ]) {
-      try {
-        resolveSqliteSource(config)
-        assert.fail(`accepted ${JSON.stringify(config)}`)
-      } catch (error) {
-        assert.instanceOf(error, errors.E_BACKUP_SOURCE)
-        assert.propertyVal(error as object, 'code', 'E_BACKUP_SOURCE')
-      }
+    for (const [config, code] of [
+      [undefined, 'E_BACKUP_SOURCE_CONNECTION'],
+      [sqlite('/a.db', 'pg'), 'E_BACKUP_SOURCE_CLIENT'],
+      [sqlite(':memory:'), 'E_BACKUP_SOURCE_NOT_FILE_BACKED'],
+      [sqlite(''), 'E_BACKUP_SOURCE_NOT_FILE_BACKED'],
+      [sqlite(undefined), 'E_BACKUP_SOURCE_NOT_FILE_BACKED'],
+      [sqlite('file:/a.db?mode=memory'), 'E_BACKUP_SOURCE_URI'],
+      [sqlite('  :memory:  '), 'E_BACKUP_SOURCE_NOT_FILE_BACKED'],
+      [sqlite('   '), 'E_BACKUP_SOURCE_NOT_FILE_BACKED'],
+      [sqlite('  file:/a.db?mode=memory  '), 'E_BACKUP_SOURCE_URI'],
+    ] as const) {
+      assert.throws(() => resolveSqliteSource(config), errors[code])
     }
     assert.throws(() => resolveSqliteSource(sqlite('/a.db'), 'missing'), /not configured/)
   })
@@ -100,10 +94,12 @@ test.group('config and source resolution', () => {
       ['E_BACKUP_NOT_FOUND', new errors.E_BACKUP_NOT_FOUND(detail, { cause }), detail],
       ['E_BACKUP_DISABLED', new errors.E_BACKUP_DISABLED({ cause }), 'backups are disabled'],
     ] as const
-    assert.deepEqual(
-      BACKUP_ERROR_CODES,
-      cases.map(([code]) => code)
-    )
+    const constructors = BACKUP_ERROR_CODES.map((code) => {
+      assert.equal(errors[code].code, code)
+      return errors[code]
+    })
+    assert.equal(new Set(BACKUP_ERROR_CODES).size, BACKUP_ERROR_CODES.length)
+    assert.equal(new Set(constructors).size, BACKUP_ERROR_CODES.length)
     for (const [code, error, message] of cases) {
       const matches = BACKUP_ERROR_CODES.filter((candidate) => error instanceof errors[candidate])
       assert.deepEqual(matches, [code])

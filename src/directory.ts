@@ -1,11 +1,13 @@
 import { chmodSync, lstatSync, mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.js'
+import { E_BACKUP_ROOT_FILE_TYPE, E_BACKUP_ROOT_NOT_FOUND, E_BACKUP_ROOT_UNSAFE } from './errors.js'
 import { syncPath } from './fs.js'
 import { resolveFilesystemPath } from './paths.js'
 
 /**
  * Create or tighten a backup root to owner-only access. Call once at startup.
+ *
+ * @throws A path, archive root or filesystem error.
  *
  * @example
  * ```ts
@@ -47,10 +49,8 @@ export function assertDirectory(
   { requirePrivateRoot = false }: AssertDirectoryOptions = {}
 ): void {
   const stat = statSync(directory, { throwIfNoEntry: false })
-  if (!stat) throw new E_BACKUP_NOT_FOUND(`backup directory ${directory} is missing`)
-  if (!stat.isDirectory() || (requirePrivateRoot && (stat.mode & 0o022) !== 0)) {
-    throw new E_BACKUP_UNSAFE(
-      `backup directory ${directory} must be a private directory; run prepareDirectory() to set mode 0700`
-    )
-  }
+  if (!stat) throw new E_BACKUP_ROOT_NOT_FOUND(`backup directory ${directory} is missing`)
+  const detail = `backup directory ${directory} must be a private directory; run prepareDirectory() to set mode 0700`
+  if (!stat.isDirectory()) throw new E_BACKUP_ROOT_FILE_TYPE(detail)
+  if (requirePrivateRoot && (stat.mode & 0o022) !== 0) throw new E_BACKUP_ROOT_UNSAFE(detail)
 }

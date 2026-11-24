@@ -5,6 +5,8 @@ import { assertLockTimeout } from './lock.js'
 /**
  * Validate `config/backup.ts` and apply defaults.
  *
+ * @throws `InvalidArgumentsException` if a supplied configuration value is invalid.
+ *
  * @example
  * ```ts
  * import { defineConfig } from '@kevinjohn/adonisjs-sqlite-backup'

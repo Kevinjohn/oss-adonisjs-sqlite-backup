@@ -3,7 +3,13 @@ import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } f
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
-import { E_BACKUP_LOCKED, E_BACKUP_UNSAFE } from './errors.js'
+import {
+  E_BACKUP_LOCKED,
+  E_BACKUP_LOCK_FILE_LINKS,
+  E_BACKUP_LOCK_FILE_OPEN,
+  E_BACKUP_LOCK_FILE_TYPE,
+  E_BACKUP_LOCK_RELEASE,
+} from './errors.js'
 import { internalHooks } from './internal_hooks.js'
 import { resolveFilesystemPath } from './paths.js'
 import { LOCK_FILE } from './names.js'
@@ -12,6 +18,9 @@ import { openDatabase, type NativeDatabase } from './native.js'
 export interface DirectoryLock {
   /**
    * Release the directory lock after the protected operation finishes.
+   *
+   * @throws `E_BACKUP_LOCK_RELEASE` when both rollback and close fail, in that order.
+   * @throws The underlying failure when either rollback or close fails on its own.
    *
    * @example
    * ```ts
@@ -33,12 +42,16 @@ export function assertLockTimeout(timeoutMs: number): void {
   }
 }
 
+/**
+ * @throws `AggregateError` if non-Error acquisition and close both fail, with acquisition first.
+ * @throws The acquisition error with close failure attached when acquisition threw an Error.
+ */
 function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
   try {
     handle = openDatabase(path, { timeout: timeoutMs })
   } catch (cause) {
-    throw new E_BACKUP_UNSAFE(`cannot open lock file ${path}`, { cause })
+    throw new E_BACKUP_LOCK_FILE_OPEN(`cannot open lock file ${path}`, { cause })
   }
   try {
     handle.exec('BEGIN EXCLUSIVE')
@@ -63,14 +76,14 @@ function truncateLockFile(path: string): void {
   try {
     fd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   } catch (cause) {
-    throw new E_BACKUP_UNSAFE(`lock path ${path} is not a regular file`, {
+    throw new E_BACKUP_LOCK_FILE_TYPE(`lock path ${path} is not a regular file`, {
       cause,
     })
   }
   try {
     const stat = fstatSync(fd)
     if (!stat.isFile() || stat.nlink !== 1) {
-      throw new E_BACKUP_UNSAFE(`lock path ${path} must be a singly linked regular file`)
+      throw new E_BACKUP_LOCK_FILE_LINKS(`lock path ${path} must be a singly linked regular file`)
     }
     ftruncateSync(fd, 0)
   } finally {
@@ -87,6 +100,9 @@ function truncateLockFile(path: string): void {
  * The lock file never holds data, so a damaged (non-empty, non-SQLite) one is truncated and the
  * lock retried. That is safe: nobody can hold a lock on a damaged file, and truncating the empty
  * file another process has just locked changes nothing.
+ *
+ * @throws `E_BACKUP_LOCKED` on contention and a path or native error if the lock cannot be opened.
+ * @throws `AggregateError` if non-Error acquisition and close both fail, with acquisition first.
  *
  * @example
  * ```ts
@@ -105,7 +121,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   const path = join(resolveFilesystemPath(directory), LOCK_FILE)
   const stat = lstatSync(path, { throwIfNoEntry: false })
   if (stat && !stat.isFile()) {
-    throw new E_BACKUP_UNSAFE(`lock path ${path} is not a regular file`)
+    throw new E_BACKUP_LOCK_FILE_TYPE(`lock path ${path} is not a regular file`)
   }
   let handle: NativeDatabase
   try {
@@ -114,7 +130,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
     handle = acquireNativeLock(path, wait)
   } catch (error) {
     if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
-    const code = (error as { code?: string }).code
+    const code = (error as { code?: string } | null | undefined)?.code
     if (code === 'SQLITE_BUSY') {
       throw new E_BACKUP_LOCKED(`backup directory ${directory} is locked`, {
         cause: error,
@@ -150,11 +166,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
         closeFailed = true
       }
       if (rollbackFailed && closeFailed) {
-        if (rollbackError instanceof Error) {
-          Object.defineProperty(rollbackError, 'resourceCleanupErrors', { value: [closeError] })
-          throw rollbackError
-        }
-        throw new AggregateError([rollbackError, closeError], 'lock release failed')
+        throw new E_BACKUP_LOCK_RELEASE([rollbackError, closeError], { cause: rollbackError })
       }
       if (rollbackFailed) throw rollbackError
       if (closeFailed) throw closeError
@@ -162,7 +174,12 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   }
 }
 
-/** Wait for a create lock without blocking the event loop needed by an in-process backup. */
+/**
+ * Wait for a create lock without blocking the event loop needed by an in-process backup.
+ *
+ * @throws `E_BACKUP_LOCKED` when the wait ends, or any non-contention acquisition error.
+ * @throws `AggregateError` if non-Error acquisition and close both fail, with acquisition first.
+ */
 export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
   assertLockTimeout(timeoutMs)
   const deadline = performance.now() + timeoutMs

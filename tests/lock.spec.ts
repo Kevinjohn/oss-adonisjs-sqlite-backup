@@ -71,8 +71,9 @@ test.group('Directory lock', () => {
       } catch (caught) {
         error = caught as Error & { resourceCleanupErrors?: Error[] }
       }
-      assert.match(String(error), /rollback failed/)
-      assert.match(String(error?.resourceCleanupErrors?.[0]), /close failed/)
+      assert.instanceOf(error, errors.E_BACKUP_LOCK_RELEASE)
+      assert.match(String(error?.resourceCleanupErrors?.[0]), /rollback failed/)
+      assert.match(String(error?.resourceCleanupErrors?.[1]), /close failed/)
       prototype.exec = originalExec
       failClose = false
       lock.release()
@@ -113,8 +114,11 @@ test.group('Directory lock', () => {
       } catch (error) {
         failure = error
       }
-      assert.instanceOf(failure, AggregateError)
-      assert.deepEqual((failure as AggregateError).errors, [undefined, 0])
+      assert.instanceOf(failure, errors.E_BACKUP_LOCK_RELEASE)
+      assert.deepEqual(
+        (failure as InstanceType<typeof errors.E_BACKUP_LOCK_RELEASE>).resourceCleanupErrors,
+        [undefined, 0]
+      )
     } finally {
       prototype.exec = originalExec
       prototype.close = originalClose
@@ -367,7 +371,7 @@ test.group('Directory lock', () => {
     }
   }).timeout(20_000)
 
-  test('an unopenable lock path is E_BACKUP_UNSAFE; a damaged lock file is truncated and works', async ({
+  test('an unopenable lock path is E_BACKUP_LOCK_FILE_OPEN; a damaged lock file is truncated and works', async ({
     assert,
   }) => {
     assert.throws(() => acquireLock('/nonexistent/dir/for/lock'), /cannot open lock file/)

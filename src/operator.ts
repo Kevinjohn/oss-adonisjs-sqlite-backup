@@ -1,7 +1,15 @@
 import { existsSync, lstatSync } from 'node:fs'
 import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import type { Database } from '@adonisjs/lucid/database'
-import { E_BACKUP_LOCKED, E_BACKUP_SOURCE } from './errors.js'
+import {
+  E_BACKUP_OPERATOR_CLEANUP,
+  E_BACKUP_OPERATOR_HANDLE_UNAVAILABLE,
+  E_BACKUP_OPERATOR_RELEASE_REFUSED,
+  E_BACKUP_OPERATOR_POOL_INCOMPLETE,
+  E_BACKUP_OPERATOR_HANDLE_OPEN,
+  E_BACKUP_OPERATOR_LOCKED,
+  E_BACKUP_OPERATOR_SOURCE,
+} from './errors.js'
 import type { NativeDatabase } from './native.js'
 import { normalizeConfiguredSqliteFilename } from './source.js'
 
@@ -10,7 +18,7 @@ import { normalizeConfiguredSqliteFilename } from './source.js'
  * database file it uses. Call it before opening any connection.
  * @throws InvalidArgumentsException `Refusing without --confirm-server-stopped` when the operator has not confirmed.
  * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
- * @throws E_BACKUP_SOURCE when the database is in memory or is not an existing regular file.
+ * @throws E_BACKUP_OPERATOR_SOURCE when the database is in memory or is not an existing regular file.
  *
  * @example
  * ```ts
@@ -42,7 +50,7 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
     !existsSync(path) ||
     !lstatSync(path).isFile()
   ) {
-    throw new E_BACKUP_SOURCE('Operator commands require an existing on-disk database')
+    throw new E_BACKUP_OPERATOR_SOURCE()
   }
   return path
 }
@@ -76,8 +84,11 @@ const activeOperators = new WeakSet<Database>()
  * Concurrent calls on the same Database are refused before cleanup ownership is taken.
  * Only SQLITE_BUSY during exclusive-lock acquisition receives stopped-server advice; other
  * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
- * both fail, AggregateError contains the work failure first and cleanup failures in observation
- * order.
+ * both fail, the primary failure precedes cleanup failures in observation order.
+ *
+ * @throws `AggregateError` when both setup or work and cleanup fail, with the primary failure first.
+ * @throws `E_BACKUP_OPERATOR_CLEANUP` for multiple cleanup failures after successful work.
+ * @throws A single setup, work or cleanup failure as observed.
  *
  * @example
  * ```ts
@@ -106,11 +117,16 @@ export async function withOperatorDatabase<T>(
   }
 }
 
+/**
+ * @throws `AggregateError` when setup or work fails before cleanup also fails, with the primary failure first.
+ * @throws `E_BACKUP_OPERATOR_CLEANUP` for multiple cleanup failures after successful work.
+ */
 async function runOperatorDatabase<T>(
   db: Database,
   run: (connection: NativeDatabase) => Promise<T>
 ): Promise<T> {
   const errors: unknown[] = []
+  let workFailed = false
   let result!: T
   let handle: Handle | undefined
   let client: Client | undefined
@@ -135,12 +151,9 @@ async function runOperatorDatabase<T>(
         error instanceof Error &&
         /^SQLITE_BUSY(?:_|$)/.test((error as Error & { code?: string }).code ?? '')
       ) {
-        throw new E_BACKUP_LOCKED(
-          'Another process holds this database; stop the server and retry',
-          {
-            cause: error,
-          }
-        )
+        throw new E_BACKUP_OPERATOR_LOCKED({
+          cause: error,
+        })
       }
       throw error
     }
@@ -155,11 +168,7 @@ async function runOperatorDatabase<T>(
       acquireTimeoutMillis: owner.acquireTimeoutMillis,
       propagateCreateError: true,
       create: async () => {
-        if (created)
-          throw (
-            validationFailure ??
-            new RuntimeException('Operator database handle is no longer available')
-          )
+        if (created) throw validationFailure ?? new E_BACKUP_OPERATOR_HANDLE_UNAVAILABLE()
         created = true
         return pinned
       },
@@ -170,12 +179,9 @@ async function runOperatorDatabase<T>(
         try {
           return await validate(candidate)
         } catch (error) {
-          validationFailure = new RuntimeException(
-            'Operator database handle is no longer available',
-            {
-              cause: error,
-            }
-          )
+          validationFailure = new E_BACKUP_OPERATOR_HANDLE_UNAVAILABLE({
+            cause: error,
+          })
           return false
         }
       },
@@ -183,6 +189,7 @@ async function runOperatorDatabase<T>(
     client.pool = loan
     result = await run(pinned)
   } catch (error) {
+    workFailed = true
     errors.push(error)
   }
 
@@ -196,8 +203,7 @@ async function runOperatorDatabase<T>(
   }
   if (handle && owner) {
     try {
-      if (!owner.release(handle))
-        errors.push(new RuntimeException('Operator database owner refused the handle release'))
+      if (!owner.release(handle)) errors.push(new E_BACKUP_OPERATOR_RELEASE_REFUSED())
     } catch (error) {
       errors.push(error)
     }
@@ -267,7 +273,7 @@ async function runOperatorDatabase<T>(
       const pending = record.pools.filter((item) => !item.completed)
       if (pending.length > record.disconnectCount) {
         errors.push(
-          new RuntimeException(
+          new E_BACKUP_OPERATOR_POOL_INCOMPLETE(
             `Operator connection ${record.name} pool cleanup incomplete: ${pending.flatMap((item) => item.roles).join(', ')}`
           )
         )
@@ -276,15 +282,17 @@ async function runOperatorDatabase<T>(
     }
   }
   if (handle?.open) {
-    if (!primaryCleanupObserved)
-      errors.push(new RuntimeException('Operator database handle remained open after pool cleanup'))
+    if (!primaryCleanupObserved) errors.push(new E_BACKUP_OPERATOR_HANDLE_OPEN())
     try {
       handle.close()
     } catch (error) {
       errors.push(error)
     }
   }
-  if (errors.length > 1) throw new AggregateError(errors, 'Operator database cleanup failed')
+  if (errors.length > 1) {
+    if (workFailed) throw new AggregateError(errors, 'Operator database cleanup failed')
+    throw new E_BACKUP_OPERATOR_CLEANUP(errors, { cause: errors[0] })
+  }
   if (errors.length === 1) throw errors[0]
   return result
 }

@@ -1,10 +1,12 @@
 import { createHash } from 'node:crypto'
 import { closeSync, fsyncSync, openSync, readSync, writeSync } from 'node:fs'
-import { E_BACKUP_INVALID } from './errors.js'
+import { E_BACKUP_WRITE_INCOMPLETE } from './errors.js'
 import { internalHooks } from './internal_hooks.js'
 
 /**
  * fsync a file or directory by path.
+ *
+ * @throws A filesystem error if the path cannot be opened, synced or closed.
  *
  * @example
  * ```ts
@@ -35,7 +37,7 @@ export function writeAll(
   for (let offset = 0; offset < data.length;) {
     const written = write(fd, data, offset)
     if (written <= 0)
-      throw new E_BACKUP_INVALID(`write stopped after ${offset} of ${data.length} bytes`)
+      throw new E_BACKUP_WRITE_INCOMPLETE(`write stopped after ${offset} of ${data.length} bytes`)
     offset += written
   }
 }

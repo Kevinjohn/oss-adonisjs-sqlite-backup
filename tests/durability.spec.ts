@@ -82,7 +82,7 @@ test.group('durability', (group) => {
     try {
       await assert.rejects(
         () => createBundle(input),
-        errors.E_BACKUP_INVALID,
+        errors.E_BACKUP_WRITE_INCOMPLETE,
         /write stopped after 5 of [0-9]+ bytes/
       )
       assert.deepEqual(offsets, [0, 5])
@@ -221,7 +221,7 @@ test.group('durability', (group) => {
     assert.deepEqual(chunks, ['012', '345', '678', '9'])
     assert.throws(
       () => writeAll(7, data, (_fd, _buffer, offset) => (offset === 0 ? 3 : 0)),
-      errors.E_BACKUP_INVALID,
+      errors.E_BACKUP_WRITE_INCOMPLETE,
       /write stopped after 3 of 10 bytes/
     )
   })

@@ -16,7 +16,7 @@ As a host operator, I want to create a verified backup bundle from the configure
 - The copy is made using SQLite backup, journal and migration metadata are checked, `readDatabaseIntegrityProblem()` runs full integrity and foreign-key checks, and a read-only database file plus manifest are written before READY is durably written last.
 - Verification uses package-opened SQLite connections. SQL functions, collations or extensions registered only on the application's connection are not registered on those handles. A schema that depends on them, such as an expression index using an application-registered function, may fail verification; create fails closed and does not publish the bundle. There is no connection initialiser hook.
 - The existing source journal mode is read, not changed. A non-WAL source produces a warning unless `requireWal` makes it a refusal. The backup copy is checkpointed and normalised to `journal_mode=DELETE`. A failed create cleans up its unfinished bundle where possible and exits nonzero. If cleanup fails, inspect the cleanup error and the archive before retrying. A bundle may remain visible if its READY marker could not be removed.
-- Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_UNSAFE` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
+- Create is refused with `E_BACKUP_LOCKED` when another run holds `.backup.lock` for longer than `lockTimeoutMs`, and with `E_BACKUP_CLOCK_SKEW` when the newest existing bundle is dated more than 24 hours after the clock; the operator fixes the clock or moves that bundle, then retries.
 - `create` uses only configured backup directory; `--directory` is invalid for this operation.
 
 - Create compares every ordered row of the source migration journal with the copy. A missing journal omits migration metadata. Unsupported metadata prevents publication. [Adoption scenarios](../../tests/adoption.spec.ts)
@@ -36,7 +36,7 @@ flowchart TD
     J -->|No and allowed| L["Continue without changing source journal mode"]
     L --> Y{"Newest bundle dated over 24 h ahead of clock?"}
     J -->|Yes| Y
-    Y -->|Yes| Z["Refuse E_BACKUP_UNSAFE; fix clock or move that bundle"]
+    Y -->|Yes| Z["Refuse E_BACKUP_CLOCK_SKEW; fix clock or move that bundle"]
     Y -->|No| D["Copy, normalise copy to DELETE, verify and write manifest"]
     D --> E{"All checks pass?"}
     E -->|No| F["Report failure"]
@@ -64,11 +64,11 @@ flowchart TD
     O --> O1{"Source readable and not in transaction?"}
     O1 -->|No| K
     O1 -->|Yes| J{"Non-WAL?"}
-    J -->|"Non-WAL and requireWal"| K["Throw E_BACKUP_SOURCE"]
+    J -->|"Non-WAL and requireWal"| K["Throw E_BACKUP_SOURCE_NOT_WAL"]
     J -->|"Non-WAL and allowed"| L["Add warning without changing source"]
     J -->|"No, source is WAL"| Q{"Newest bundle over MAX_FUTURE_MS ahead of clock?"}
     L --> Q
-    Q -->|Yes| R["Throw E_BACKUP_UNSAFE"]
+    Q -->|Yes| R["Throw E_BACKUP_CLOCK_SKEW"]
     Q -->|No| S["mkdir bundle directory; this call now owns it"]
     S --> N["Sync archive and read source migration rows"]
     N --> F["NativeDatabase.backup to db.sqlite"]

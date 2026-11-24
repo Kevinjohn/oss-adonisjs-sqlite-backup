@@ -1,7 +1,13 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import * as errors from '../src/errors.js'
-import { BACKUP_ERROR_CODES, E_BACKUP_UNSAFE } from '../src/errors.js'
+import {
+  BACKUP_ERROR_CODES,
+  E_BACKUP_FLAG_ACTION,
+  E_BACKUP_INVALID_KEEP,
+  E_BACKUP_TARGET_REQUIRED,
+  E_BACKUP_UNKNOWN_ACTION,
+} from '../src/errors.js'
 import { pruneKeepProblem } from '../src/prune.js'
 import { resolveFilesystemPath } from '../src/paths.js'
 import { assertSafeLayout } from '../src/source.js'
@@ -59,7 +65,7 @@ export default class DbBackup extends BaseCommand {
       for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
         if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
         if (!(actions as readonly string[]).includes(this.action)) {
-          throw new E_BACKUP_UNSAFE(
+          throw new E_BACKUP_FLAG_ACTION(
             `--${flag} is only supported for ${formatFlagActionNames(actions)}`
           )
         }
@@ -81,7 +87,7 @@ export default class DbBackup extends BaseCommand {
           return
         case 'restore-prepare': {
           if (!this.target) {
-            throw new E_BACKUP_UNSAFE('restore-prepare needs --target')
+            throw new E_BACKUP_TARGET_REQUIRED()
           }
           const staged = backup.prepareRestore({
             target: this.target,
@@ -96,7 +102,7 @@ export default class DbBackup extends BaseCommand {
         case 'prune': {
           if (this.keep !== undefined) {
             const keepProblem = pruneKeepProblem(this.keep)
-            if (keepProblem) throw new E_BACKUP_UNSAFE(keepProblem)
+            if (keepProblem) throw new E_BACKUP_INVALID_KEEP(keepProblem)
           }
           const result = await backup.prune({ keep: this.keep })
           this.reportPruneFailures(result.failed)
@@ -107,7 +113,9 @@ export default class DbBackup extends BaseCommand {
           return
         }
         default:
-          throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${ACTIONS.join(', ')})`)
+          throw new E_BACKUP_UNKNOWN_ACTION(
+            `unknown action "${this.action}" (use ${ACTIONS.join(', ')})`
+          )
       }
     } catch (error) {
       const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])

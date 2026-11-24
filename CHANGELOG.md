@@ -10,23 +10,28 @@
   A calling command should not report the copied `error` again; the README example does not.
 
 - Replace the `BackupException` and `errors.BackupException` exports with one exception class per
-  backup code. Match the corresponding class with `instanceof` or continue matching
-  `error.code`. `BackupErrorCode` and `BACKUP_ERROR_CODES` remain available.
+  cause. Match the corresponding class with `instanceof` or match its `error.code`.
+  `BackupErrorCode` and `BACKUP_ERROR_CODES` remain available with the expanded code set.
 
-  | Previous exception check                    | Replacement                 |
-  | ------------------------------------------- | --------------------------- |
-  | `BackupException` with `E_BACKUP_LOCKED`    | `errors.E_BACKUP_LOCKED`    |
-  | `BackupException` with `E_BACKUP_SOURCE`    | `errors.E_BACKUP_SOURCE`    |
-  | `BackupException` with `E_BACKUP_INVALID`   | `errors.E_BACKUP_INVALID`   |
-  | `BackupException` with `E_BACKUP_UNSAFE`    | `errors.E_BACKUP_UNSAFE`    |
-  | `BackupException` with `E_BACKUP_NOT_FOUND` | `errors.E_BACKUP_NOT_FOUND` |
-  | `BackupException` with `E_BACKUP_DISABLED`  | `errors.E_BACKUP_DISABLED`  |
+  | Previous error code  | Replacement                                                                                                                                                                                                                   |
+  | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `E_BACKUP_LOCKED`    | `errors.E_BACKUP_LOCKED` for archive contention, `errors.E_BACKUP_OPERATOR_LOCKED` for live database contention                                                                                                               |
+  | `E_BACKUP_SOURCE`    | `errors.E_BACKUP_SOURCE` for unreadable owned sources, with distinct codes for connection settings, read failures on borrowed handles and source preconditions                                                                |
+  | `E_BACKUP_INVALID`   | `errors.E_BACKUP_INVALID` for SQLite integrity damage, with distinct codes for checksum, manifest, migration journal, foreign-key and write failures                                                                          |
+  | `E_BACKUP_UNSAFE`    | `errors.E_BACKUP_UNSAFE` for an archive containing the live database, with distinct codes for other path, layout and command input failures                                                                                   |
+  | `E_BACKUP_NOT_FOUND` | `errors.E_BACKUP_NOT_FOUND` for a missing named bundle, `errors.E_BACKUP_NO_READY_BUNDLE` for an empty archive, `errors.E_BACKUP_ROOT_NOT_FOUND` for a missing root, and `errors.E_BACKUP_BUNDLE_PRUNED` for concurrent prune |
+  | `E_BACKUP_DISABLED`  | `errors.E_BACKUP_DISABLED`                                                                                                                                                                                                    |
+
+- Multiple cleanup failures after successful work now use `errors.E_BACKUP_CLEANUP` or
+  `errors.E_BACKUP_OPERATOR_CLEANUP`. Failed lock rollback and close use
+  `errors.E_BACKUP_LOCK_RELEASE`. These exceptions expose the ordered failures through
+  `resourceCleanupErrors`.
 
 - Malformed backup configuration and invalid API arguments for retention or lock timeout now
   throw AdonisJS's `InvalidArgumentsException`. Missing backup configuration throws
   AdonisJS's `RuntimeException`. Operator guards use framework exceptions for invalid arguments
-  and pool state, `errors.E_BACKUP_SOURCE` for a missing on-disk source, and
-  `errors.E_BACKUP_LOCKED` for exclusive-lock contention.
+  and pool setup, `errors.E_BACKUP_OPERATOR_SOURCE` for a missing on-disk source, and
+  `errors.E_BACKUP_OPERATOR_LOCKED` for exclusive-lock contention.
 - Add TypeScript examples to the public API documentation.
 
 ## 0.4.3 - 2026-11-24

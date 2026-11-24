@@ -1,6 +1,11 @@
 import { lstatSync, readlinkSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
-import { E_BACKUP_UNSAFE } from './errors.js'
+import {
+  E_BACKUP_PATH_MISSING_DOT,
+  E_BACKUP_PATH_MISSING_DOT_DOT,
+  E_BACKUP_PATH_NOT_DIRECTORY,
+  E_BACKUP_PATH_SYMLINK_LIMIT,
+} from './errors.js'
 
 /** Symlink hops followed before giving up, as Linux does (MAXSYMLINKS). */
 const MAX_LINKS = 40
@@ -36,17 +41,17 @@ export function resolveFilesystemPath(path: string): string {
   while (pending.length > 0) {
     const segment = pending.shift()!
     if (!isDirectory) {
-      throw new E_BACKUP_UNSAFE(`path ${path} traverses a non-directory`)
+      throw new E_BACKUP_PATH_NOT_DIRECTORY(`path ${path} traverses a non-directory`)
     }
     if (segment === TRAILING_SLASH) continue
     if (segment === '.') {
       if (isBeyondExistingPrefix)
-        throw new E_BACKUP_UNSAFE(`path ${path} has . after a missing folder`)
+        throw new E_BACKUP_PATH_MISSING_DOT(`path ${path} has . after a missing folder`)
       continue
     }
     if (segment === '..') {
       if (isBeyondExistingPrefix) {
-        throw new E_BACKUP_UNSAFE(`path ${path} has .. after a missing folder`)
+        throw new E_BACKUP_PATH_MISSING_DOT_DOT(`path ${path} has .. after a missing folder`)
       }
       current = dirname(current)
       continue
@@ -64,7 +69,7 @@ export function resolveFilesystemPath(path: string): string {
       continue
     }
     if (++hops > MAX_LINKS) {
-      throw new E_BACKUP_UNSAFE(`too many symlinks resolving ${path}`)
+      throw new E_BACKUP_PATH_SYMLINK_LIMIT(`too many symlinks resolving ${path}`)
     }
     const link = readlinkSync(next)
     if (isAbsolute(link)) current = '/'

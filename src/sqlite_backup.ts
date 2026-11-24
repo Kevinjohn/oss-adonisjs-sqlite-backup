@@ -1,6 +1,14 @@
 import { createBundle, listBundles, verifyBundle } from './bundles.js'
 import { prepareDirectory } from './directory.js'
-import { E_BACKUP_DISABLED, E_BACKUP_SOURCE } from './errors.js'
+import {
+  E_BACKUP_DISABLED,
+  E_BACKUP_SOURCE,
+  E_BACKUP_SOURCE_CLIENT,
+  E_BACKUP_SOURCE_CONNECTION,
+  E_BACKUP_SOURCE_DRIVER_PATH,
+  E_BACKUP_SOURCE_NOT_FILE_BACKED,
+  E_BACKUP_SOURCE_URI,
+} from './errors.js'
 import type { NativeDatabase } from './native.js'
 import { resolveFilesystemPath } from './paths.js'
 import { pruneBundles } from './prune.js'
@@ -41,6 +49,8 @@ export class SqliteBackup {
   /**
    * Live SQLite path, read from Lucid’s connection config on every call.
    *
+   * @throws `E_BACKUP_DISABLED` or a configured source resolution error.
+   *
    * @example
    * ```ts
    * const livePath = backup.livePath()
@@ -53,6 +63,8 @@ export class SqliteBackup {
 
   /**
    * Fail startup if the configured source cannot be opened, without creating a bundle.
+   *
+   * @throws `E_BACKUP_DISABLED`, a source resolution error, or an error reading the source.
    *
    * @example
    * ```ts
@@ -69,7 +81,7 @@ export class SqliteBackup {
         source.close()
       }
     } catch (cause) {
-      if (cause instanceof E_BACKUP_SOURCE) throw cause
+      if (cause instanceof E_BACKUP_SOURCE_DRIVER_PATH) throw cause
       throw new E_BACKUP_SOURCE(`live database ${path} cannot be read`, {
         cause,
       })
@@ -78,6 +90,8 @@ export class SqliteBackup {
 
   /**
    * Prepare the root after checking it does not contain the configured live database.
+   *
+   * @throws `E_BACKUP_DISABLED`, an unsafe layout or a filesystem error preparing the root.
    *
    * @example
    * ```ts
@@ -92,6 +106,9 @@ export class SqliteBackup {
 
   /**
    * Copy the live database and publish a verified backup bundle.
+   *
+   * @throws `AggregateError` when lock acquisition or copy fails with a non-Error and cleanup also fails, with the primary failure first.
+   * @throws Configuration, source, archive, verification and native errors from creating the bundle.
    *
    * @example
    * ```ts
@@ -118,6 +135,8 @@ export class SqliteBackup {
   /**
    * List published bundles in creation order, oldest first.
    *
+   * @throws `E_BACKUP_DISABLED` or an archive path or manifest error.
+   *
    * @example
    * ```ts
    * const bundles = backup.list()
@@ -130,6 +149,8 @@ export class SqliteBackup {
   /**
    * Verify a published bundle, defaulting to the newest.
    *
+   * @throws `E_BACKUP_DISABLED` or a bundle lookup or verification error.
+   *
    * @example
    * ```ts
    * const bundle = backup.verify()
@@ -141,6 +162,8 @@ export class SqliteBackup {
 
   /**
    * Stage a verified copy for recovery at an unused path.
+   *
+   * @throws `E_BACKUP_DISABLED` or a source, target, copy or bundle verification error.
    *
    * @example
    * ```ts
@@ -161,13 +184,22 @@ export class SqliteBackup {
       livePath = resolveSqliteSource(this.database, this.config.connection)
     } catch (error) {
       // A service can create backups from borrowed handles without a configured file source.
-      if (!(error instanceof E_BACKUP_SOURCE)) throw error
+      if (!(
+        error instanceof E_BACKUP_SOURCE_CONNECTION ||
+        error instanceof E_BACKUP_SOURCE_CLIENT ||
+        error instanceof E_BACKUP_SOURCE_NOT_FILE_BACKED ||
+        error instanceof E_BACKUP_SOURCE_URI
+      ))
+        throw error
     }
     if (livePath !== undefined) assertSourceOutsideDirectory(livePath, directory)
   }
 
   /**
    * Remove unfinished bundles and retain the newest published bundles.
+   *
+   * @throws `AggregateError` when lock acquisition or prune work fails with a non-Error and cleanup also fails, with the primary failure first.
+   * @throws Configuration, archive and finalization errors from pruning.
    *
    * @example
    * ```ts

@@ -13,8 +13,30 @@ import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { assertDirectory } from './directory.js'
 import { assertMigrations, readMigrationRows } from './migrations.js'
-import { readDatabaseIntegrityProblem } from './checks.js'
-import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
+import { assertDatabaseIntegrity } from './checks.js'
+import {
+  E_BACKUP_BUNDLE_EXISTS,
+  E_BACKUP_BUNDLE_FILE_TYPE,
+  E_BACKUP_BUNDLE_PRUNED,
+  E_BACKUP_CHECKSUM_MISMATCH,
+  E_BACKUP_CLEANUP,
+  E_BACKUP_CLOCK_SKEW,
+  E_BACKUP_DATABASE_FILE_TYPE,
+  E_BACKUP_DATABASE_MISSING,
+  E_BACKUP_DATABASE_UNREADABLE,
+  E_BACKUP_JOURNAL_METADATA,
+  E_BACKUP_JOURNAL_MISMATCH,
+  E_BACKUP_MANIFEST_FILE_TYPE,
+  E_BACKUP_MANIFEST_SHAPE,
+  E_BACKUP_MANIFEST_UNREADABLE,
+  E_BACKUP_NOT_FOUND,
+  E_BACKUP_NO_READY_BUNDLE,
+  E_BACKUP_READY_MISSING,
+  E_BACKUP_SOURCE,
+  E_BACKUP_SOURCE_DRIVER_PATH,
+  E_BACKUP_SOURCE_NOT_WAL,
+  E_BACKUP_SOURCE_TRANSACTION,
+} from './errors.js'
 import { resolveFilesystemPath } from './paths.js'
 import { hashFileSha256, syncPath, writeDurable } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
@@ -54,6 +76,8 @@ export function listBundleDirectoryNames(directory: string): string[] {
 /**
  * Published bundles only (READY present), oldest first. Name order is creation order.
  *
+ * @throws Archive path, manifest or filesystem errors when listing cannot complete.
+ *
  * @example
  * ```ts
  * import { listBundles } from '@kevinjohn/adonisjs-sqlite-backup'
@@ -89,14 +113,14 @@ export function requireSelectedBundle(directory: string, name?: string): BundleL
     const stat = lstatSync(path, { throwIfNoEntry: false })
     if (!stat) throw new E_BACKUP_NOT_FOUND(`no bundle ${name}`)
     if (!stat.isDirectory()) {
-      throw new E_BACKUP_UNSAFE(`${name} is not a bundle directory`)
+      throw new E_BACKUP_BUNDLE_FILE_TYPE(`${name} is not a bundle directory`)
     }
     return { name, path }
   }
   const newest = listBundleDirectoryNames(directory)
     .filter((entry) => existsSync(join(directory, entry, READY)))
     .at(-1)
-  if (!newest) throw new E_BACKUP_NOT_FOUND(`no READY bundle in ${directory}`)
+  if (!newest) throw new E_BACKUP_NO_READY_BUNDLE(`no READY bundle in ${directory}`)
   return { name: newest, path: join(directory, newest) }
 }
 
@@ -115,14 +139,16 @@ function isMigrationManifest(value: unknown): value is NonNullable<BundleManifes
 /** Read the manifest of a published bundle; a missing READY means the bundle does not exist yet. */
 export function readManifest(bundle: BundleLocation): BundleManifest {
   if (!existsSync(join(bundle.path, READY))) {
-    throw new E_BACKUP_INVALID(`bundle ${bundle.name} has no READY marker`)
+    throw new E_BACKUP_READY_MISSING(`bundle ${bundle.name} has no READY marker`)
   }
   try {
     if (
       !lstatSync(join(bundle.path, READY)).isFile() ||
       !lstatSync(join(bundle.path, MANIFEST)).isFile()
     ) {
-      throw new E_BACKUP_INVALID('expected regular READY and manifest files')
+      throw new E_BACKUP_MANIFEST_FILE_TYPE(
+        `bundle ${bundle.name} manifest is unreadable: expected regular READY and manifest files`
+      )
     }
     const manifest = JSON.parse(readFileSync(join(bundle.path, MANIFEST), 'utf8')) as BundleManifest
     if (
@@ -133,10 +159,12 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
       new Date(manifest.createdAt).toISOString() !== manifest.createdAt ||
       (Object.hasOwn(manifest, 'migrations') && !isMigrationManifest(manifest.migrations))
     )
-      throw new E_BACKUP_INVALID('bad shape')
+      throw new E_BACKUP_MANIFEST_SHAPE(`bundle ${bundle.name} manifest is unreadable: bad shape`)
     return manifest
   } catch (cause) {
-    throw new E_BACKUP_INVALID(`bundle ${bundle.name} manifest is unreadable`, {
+    if (cause instanceof E_BACKUP_MANIFEST_FILE_TYPE || cause instanceof E_BACKUP_MANIFEST_SHAPE)
+      throw cause
+    throw new E_BACKUP_MANIFEST_UNREADABLE(`bundle ${bundle.name} manifest is unreadable`, {
       cause,
     })
   }
@@ -147,24 +175,32 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
   let matches: boolean
   try {
     const stat = lstatSync(path)
-    if (!stat.isFile()) throw new E_BACKUP_INVALID('expected a regular database file')
+    if (!stat.isFile())
+      throw new E_BACKUP_DATABASE_FILE_TYPE(
+        `${label}: database file cannot be read: expected a regular database file`
+      )
     matches = stat.size === manifest.bytes && hashFileSha256(path) === manifest.sha256
   } catch (cause) {
-    throw new E_BACKUP_INVALID(`${label}: database file cannot be read`, {
+    if (cause instanceof E_BACKUP_DATABASE_FILE_TYPE) throw cause
+    if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new E_BACKUP_DATABASE_MISSING(`${label}: database file cannot be read`, { cause })
+    }
+    throw new E_BACKUP_DATABASE_UNREADABLE(`${label}: database file cannot be read`, {
       cause,
     })
   }
   if (!matches) {
-    throw new E_BACKUP_INVALID(`${label}: checksum does not match manifest`)
+    throw new E_BACKUP_CHECKSUM_MISMATCH(`${label}: checksum does not match manifest`)
   }
-  const problem = readDatabaseIntegrityProblem(path)
-  if (problem) throw new E_BACKUP_INVALID(`${label}: ${problem}`)
+  assertDatabaseIntegrity(path, label)
   if (manifest.migrations) assertMigrations(path, manifest.migrations)
 }
 
 /**
  * Re-verify a published bundle in place. Lock-free: if prune unpublishes the bundle while it is
- * being checked, the result is E_BACKUP_NOT_FOUND, not a false E_BACKUP_INVALID.
+ * being checked, verification reports E_BACKUP_BUNDLE_PRUNED.
+ *
+ * @throws Bundle lookup, manifest or database verification errors.
  *
  * @example
  * ```ts
@@ -177,7 +213,7 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
   const directory = resolveFilesystemPath(folder)
   const bundle = requireSelectedBundle(directory, name)
   internalHooks.step?.('verify:listed', bundle.path)
-  // Default selection saw READY; a concurrent unpublish is reported as NOT_FOUND.
+  // Default selection saw READY; a concurrent unpublish is reported as E_BACKUP_BUNDLE_PRUNED.
   const wasReady = name === undefined || existsSync(join(bundle.path, READY))
   internalHooks.step?.('verify:selected', bundle.path)
   try {
@@ -186,7 +222,7 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
     return bundle
   } catch (error) {
     if (wasReady && !existsSync(join(bundle.path, READY))) {
-      throw new E_BACKUP_NOT_FOUND(`bundle ${bundle.name} was pruned`, {
+      throw new E_BACKUP_BUNDLE_PRUNED(`bundle ${bundle.name} was pruned`, {
         cause: error,
       })
     }
@@ -197,6 +233,10 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
 /**
  * Online copy -> full checks -> manifest -> READY last, all under the directory lock.
  * A bundle without READY is not a backup; prune removes it once nobody holds the lock.
+ *
+ * @throws `AggregateError` when a non-Error primary failure is followed by cleanup failures, with the primary failure first. Lock acquisition can also report this combination.
+ * @throws `E_BACKUP_CLEANUP` when a completed copy has multiple cleanup failures.
+ * @throws Source, layout, verification and native errors. Cleanup errors can be attached to the primary Error.
  *
  * @example
  * ```ts
@@ -237,8 +277,9 @@ export async function createBundle(
   let failed = false
   let result: CreateResult | undefined
   const cleanupErrors: unknown[] = []
-  const cleanupFailedBundle = (error: unknown): unknown => {
-    if (!bundlePath) return error
+  let bundleCleanupFailure: { error: unknown } | undefined
+  const cleanupFailedBundle = (): { error: unknown } | undefined => {
+    if (!bundlePath) return
     try {
       const marker = join(bundlePath, READY)
       if (existsSync(marker)) {
@@ -247,16 +288,9 @@ export async function createBundle(
       }
       internalHooks.step?.('create:cleanup', bundlePath)
       rmSync(bundlePath, { recursive: true, force: true })
-    } catch (cleanupError) {
-      if (error instanceof Error) {
-        Object.defineProperty(error, 'cleanupError', { value: cleanupError })
-      } else {
-        const combined = new AggregateError([error, cleanupError], 'bundle cleanup failed')
-        Object.defineProperty(combined, 'cleanupError', { value: cleanupError })
-        return combined
-      }
+    } catch (error) {
+      return { error }
     }
-    return error
   }
   try {
     let journalMode: string
@@ -264,20 +298,18 @@ export async function createBundle(
       source = borrowed ?? openOwnedSource(livePath)
       journalMode = String(source.pragma('journal_mode', { simple: true }))
     } catch (cause) {
-      if (cause instanceof E_BACKUP_SOURCE) throw cause
+      if (cause instanceof E_BACKUP_SOURCE_DRIVER_PATH) throw cause
       throw new E_BACKUP_SOURCE(`live database ${livePath} cannot be read`, {
         cause,
       })
     }
     // The backup API cannot run from a connection with an open transaction.
     if (source.inTransaction) {
-      throw new E_BACKUP_SOURCE(
-        'the borrowed database handle has an open transaction; commit or roll it back first'
-      )
+      throw new E_BACKUP_SOURCE_TRANSACTION()
     }
     if (journalMode !== 'wal') {
       const message = `live database uses journal_mode=${journalMode}, not WAL: writers in other processes wait for the whole copy`
-      if (requireWal) throw new E_BACKUP_SOURCE(message)
+      if (requireWal) throw new E_BACKUP_SOURCE_NOT_WAL(message)
       warnings.push(message)
     }
     // Names must stay strictly increasing even if the clock steps back, because prune orders by
@@ -286,7 +318,7 @@ export async function createBundle(
     const newest = listBundleDirectoryNames(directory).at(-1)
     const newestStamp = newest ? requireBundleTimestamp(newest) : Number.NEGATIVE_INFINITY
     if (newestStamp > clock + MAX_FUTURE_MS) {
-      throw new E_BACKUP_UNSAFE(
+      throw new E_BACKUP_CLOCK_SKEW(
         `newest bundle ${newest} is dated more than 24 h after the clock; fix the clock or move it`
       )
     }
@@ -297,7 +329,7 @@ export async function createBundle(
       mkdirSync(join(directory, name), { mode: 0o700 })
     } catch (cause) {
       if ((cause as NodeJS.ErrnoException).code !== 'EEXIST') throw cause
-      throw new E_BACKUP_UNSAFE(`${join(directory, name)} already exists`, {
+      throw new E_BACKUP_BUNDLE_EXISTS(`${join(directory, name)} already exists`, {
         cause,
       })
     }
@@ -324,13 +356,14 @@ export async function createBundle(
     const journal = openDatabase(file, { fileMustExist: true, readonly: true })
     try {
       if (!isDeepStrictEqual(readMigrationRows(journal, migrationsTable), migrations)) {
-        throw new E_BACKUP_INVALID(`new backup migration journal ${migrationsTable} mismatch`)
+        throw new E_BACKUP_JOURNAL_MISMATCH(
+          `new backup migration journal ${migrationsTable} mismatch`
+        )
       }
     } finally {
       journal.close()
     }
-    const problem = readDatabaseIntegrityProblem(file)
-    if (problem) throw new E_BACKUP_INVALID(`new backup failed: ${problem}`)
+    assertDatabaseIntegrity(file, 'new backup failed')
     chmodSync(file, 0o400)
     syncPath(file)
     internalHooks.step?.('create:checked', file)
@@ -351,7 +384,7 @@ export async function createBundle(
         : {}),
     }
     if (manifest.migrations && !isMigrationManifest(manifest.migrations)) {
-      throw new E_BACKUP_INVALID('new backup has unsupported migration metadata')
+      throw new E_BACKUP_JOURNAL_METADATA()
     }
     writeDurable(join(bundlePath, MANIFEST), JSON.stringify(manifest, null, 2))
     syncPath(bundlePath)
@@ -362,7 +395,8 @@ export async function createBundle(
     result = { name, path: bundlePath, createdAt: manifest.createdAt, manifest, warnings }
   } catch (error) {
     failed = true
-    primaryError = cleanupFailedBundle(error)
+    primaryError = error
+    bundleCleanupFailure = cleanupFailedBundle()
   } finally {
     try {
       if (!borrowed) source?.close()
@@ -376,28 +410,35 @@ export async function createBundle(
     }
   }
   if (failed) {
-    if (cleanupErrors.length) {
-      if (primaryError instanceof Error)
-        Object.defineProperty(primaryError, 'resourceCleanupErrors', { value: cleanupErrors })
-      else {
-        const combined = new AggregateError(
-          [primaryError, ...cleanupErrors],
-          'bundle creation and cleanup failed'
-        )
-        Object.defineProperty(combined, 'resourceCleanupErrors', { value: cleanupErrors })
-        throw combined
-      }
+    const failures = [
+      ...(bundleCleanupFailure ? [bundleCleanupFailure.error] : []),
+      ...cleanupErrors,
+    ]
+    const failure =
+      !(primaryError instanceof Error) && failures.length
+        ? new AggregateError(
+            [primaryError, ...failures],
+            bundleCleanupFailure ? 'bundle cleanup failed' : 'bundle creation and cleanup failed'
+          )
+        : primaryError
+    if (failure instanceof Error) {
+      if (bundleCleanupFailure)
+        Object.defineProperty(failure, 'cleanupError', { value: bundleCleanupFailure.error })
+      if (cleanupErrors.length)
+        Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
     }
-    throw primaryError
+    throw failure
   }
   if (cleanupErrors.length) {
+    const cleanupFailure = cleanupFailedBundle()
+    const first = cleanupErrors[0]
     const failure =
-      cleanupErrors.length === 1
-        ? cleanupErrors[0]
-        : new AggregateError(cleanupErrors, 'native resource cleanup failed')
-    if (failure instanceof AggregateError)
-      Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
-    throw cleanupFailedBundle(failure)
+      cleanupErrors.length > 1 || (cleanupFailure && !(first instanceof Error))
+        ? new E_BACKUP_CLEANUP(cleanupErrors, { cause: first })
+        : first
+    if (cleanupFailure && failure instanceof Error)
+      Object.defineProperty(failure, 'cleanupError', { value: cleanupFailure.error })
+    throw failure
   }
   return result!
 }

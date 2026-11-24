@@ -50,7 +50,7 @@ flowchart TD
     F -->|READY present| G["readManifest validates marker, manifest and createdAt"]
     G -->|Success| H["Collect BundleSummary"]
     G -->|READY or previously present manifest vanished| X
-    G -->|Other manifest failure| I["Throw E_BACKUP_INVALID"]
+    G -->|Other manifest failure| I["Throw the manifest failure"]
     H --> J["Return summaries; Ace logs names"]
     X --> J
 ```

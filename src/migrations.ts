@@ -1,4 +1,4 @@
-import { E_BACKUP_INVALID } from './errors.js'
+import { E_BACKUP_JOURNAL_MISMATCH, E_BACKUP_JOURNAL_UNREADABLE } from './errors.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 import type { BundleManifest } from './types.js'
 
@@ -41,11 +41,15 @@ export function assertMigrations(
       matches = count === expected.count && (last?.name ?? null) === expected.last
     }
     if (!matches) {
-      throw new E_BACKUP_INVALID(`migration journal ${expected.table} does not match manifest`)
+      throw new E_BACKUP_JOURNAL_MISMATCH(
+        `migration journal ${expected.table} does not match manifest`
+      )
     }
   } catch (cause) {
-    if (cause instanceof E_BACKUP_INVALID) throw cause
-    throw new E_BACKUP_INVALID(`migration journal ${expected.table} cannot be read`, { cause })
+    if (cause instanceof E_BACKUP_JOURNAL_MISMATCH) throw cause
+    throw new E_BACKUP_JOURNAL_UNREADABLE(`migration journal ${expected.table} cannot be read`, {
+      cause,
+    })
   } finally {
     database.close()
   }

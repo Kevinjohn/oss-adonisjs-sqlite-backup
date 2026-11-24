@@ -70,7 +70,7 @@ mode `0700`; an existing non-directory root is refused. The standalone `prepareD
 has no live database to compare and does not make that check. The
 manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
-`E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
+`E_BACKUP_ROOT_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
 If prune fails while syncing the archive or releasing its lock, the command exits nonzero and
 reports the removals it observed and any per-bundle errors. A failed archive sync leaves removal
 durability unconfirmed. Programmatic callers can read the same details from the error's
@@ -96,8 +96,9 @@ if (backup.config.directory) {
 configuration and throws `E_BACKUP_DISABLED` before looking up the source if the directory is
 absent or empty. It reads Lucid's connection configuration on each call, using the `connection`
 setting from `config/backup.ts` when set and Lucid's default connection otherwise. An unconfigured
-connection, a client other than `better-sqlite3`, `sqlite3` or `sqlite`, or a missing, non-string,
-empty, in-memory or URI filename yields `E_BACKUP_SOURCE`. The resolved file may be missing. Use
+connection yields `E_BACKUP_SOURCE_CONNECTION`. An unsupported client yields
+`E_BACKUP_SOURCE_CLIENT`. Invalid file-backed source settings and URI filenames yield
+`E_BACKUP_SOURCE_NOT_FILE_BACKED` and `E_BACKUP_SOURCE_URI` respectively. The resolved file may be missing. Use
 `backup.checkSource()` to check that SQLite can open and read it.
 
 With backups disabled, the application still boots and `list`, `verify` and `prepareRestore`
@@ -113,7 +114,7 @@ the configure command.
 Configured preparation and prune refuse a root containing the configured live SQLite path. For standalone prune,
 provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
-`E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
+`E_BACKUP_ROOT_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
 
 Standalone hosts can import `prepareDirectory(path)`, `createBundle`, `listBundles`,
 `verifyBundle`, `pruneBundles` and `prepareRestore`. `createBundle` accepts either `livePath` or
@@ -150,7 +151,7 @@ connection-local SQL features on its verification connections.
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
-with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
+with an unreadable manifest is `E_BACKUP_MANIFEST_UNREADABLE` and names the bundle.
 Listing checks the creation metadata without reading or hashing the database; verify and restore
 preparation check the expected size and hash against the bytes. The READY marker, manifest and
 database members must be regular files for recovery. A missing `sourceJournalMode` in an imported
@@ -267,14 +268,23 @@ try {
 }
 ```
 
-| Exception                   | When it is thrown                                                                            |
-| --------------------------- | -------------------------------------------------------------------------------------------- |
-| `errors.E_BACKUP_LOCKED`    | Another process or an earlier operation on the same event loop holds the lock.               |
-| `errors.E_BACKUP_SOURCE`    | The SQLite source is unsupported, unavailable, or fails a source check.                      |
-| `errors.E_BACKUP_INVALID`   | Verification failed, or a partial write prevented publication.                               |
-| `errors.E_BACKUP_UNSAFE`    | A path, layout, or operation failed a safety check. A write may already have been attempted. |
-| `errors.E_BACKUP_NOT_FOUND` | The backup directory or selected bundle is missing.                                          |
-| `errors.E_BACKUP_DISABLED`  | Backups are disabled. Pass an explicit directory for recovery reads.                         |
+Each exception has a distinct code and the command prints that code for package failures.
+`BACKUP_ERROR_CODES` contains the full set. Common examples include:
+
+| Exception                           | When it is thrown                                                    |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `errors.E_BACKUP_LOCKED`            | Another operation holds the archive lock.                            |
+| `errors.E_BACKUP_OPERATOR_LOCKED`   | Another connection holds the live database.                          |
+| `errors.E_BACKUP_SOURCE`            | The owned SQLite source cannot be read.                              |
+| `errors.E_BACKUP_INVALID`           | SQLite's integrity check found damage.                               |
+| `errors.E_BACKUP_CHECKSUM_MISMATCH` | The database fails the manifest checksum.                            |
+| `errors.E_BACKUP_WRITE_INCOMPLETE`  | A write stalled before publication.                                  |
+| `errors.E_BACKUP_UNSAFE`            | The archive contains the live SQLite source.                         |
+| `errors.E_BACKUP_TARGET_LIVE`       | The staging target is the live database or a sidecar.                |
+| `errors.E_BACKUP_NOT_FOUND`         | The named bundle is missing.                                         |
+| `errors.E_BACKUP_ROOT_NOT_FOUND`    | The backup root is missing.                                          |
+| `errors.E_BACKUP_INVALID_KEEP`      | The command's explicit `--keep` value is invalid.                    |
+| `errors.E_BACKUP_DISABLED`          | Backups are disabled. Pass an explicit directory for recovery reads. |
 
 Invalid API arguments such as a negative lock timeout or a retention count below one throw
 AdonisJS's `InvalidArgumentsException`. Unexpected system errors such as a full disk can
@@ -291,14 +301,15 @@ Stopped-server operator helpers report these preconditions and failures:
 
 - `operatorDatabasePath` throws `InvalidArgumentsException` when confirmation is missing or the
   primary connection is incompatible. An unavailable on-disk database throws
-  `errors.E_BACKUP_SOURCE`.
+  `errors.E_BACKUP_OPERATOR_SOURCE`.
 - `withOperatorDatabase` throws `RuntimeException` for an overlapping call on the same
   `Database` or an inconsistent pool state. When exclusive acquisition meets `SQLITE_BUSY`, it
-  throws `errors.E_BACKUP_LOCKED` with the native error as `cause` and advises stopping the server
+  throws `errors.E_BACKUP_OPERATOR_LOCKED` with the native error as `cause` and advises stopping the server
   before retrying. Other lock setup errors retain their native type.
-- A single failure, from the lock, the work or cleanup, is thrown unchanged. When more than one
-  occurs, an `AggregateError` (`Operator database cleanup failed`) lists the lock or work failure
-  first, then cleanup failures in the order they were observed.
+- A single failure is thrown unchanged. If setup or work fails and cleanup also fails, an
+  `AggregateError` lists the primary failure first and cleanup failures in observation order.
+  If work succeeds and multiple cleanup failures follow, `errors.E_BACKUP_OPERATOR_CLEANUP` has
+  the first failure as its cause and all cleanup failures in `resourceCleanupErrors`.
 
 ## Limits
 
@@ -315,7 +326,7 @@ Stopped-server operator helpers report these preconditions and failures:
   file never holds data; a damaged one is emptied and reused.
 - Linux is tested. Windows is not supported (directory fsync); `package.json` excludes it.
 - `list` and `verify` take no lock. When prune removes the bundle being verified, verify of the
-  newest bundle reports `E_BACKUP_NOT_FOUND`. A named bundle can instead report `E_BACKUP_INVALID`
+  newest bundle reports `E_BACKUP_BUNDLE_PRUNED`. A named bundle can instead report `E_BACKUP_READY_MISSING`
   ("no READY marker") if prune unpublishes it in the short window right after it is selected.
 - Paths (Lucid filename, backup folder, restore target) are resolved as the kernel and SQLite
   resolve them: `..` steps up from the real folder a symlink leads to, not from the text.

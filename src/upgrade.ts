@@ -6,6 +6,8 @@ import { resolveFilesystemPath } from './paths.js'
  * directory, or `<database>.backups` beside the database when backups are not configured.
  * Either way the bundles stay outside scheduled retention.
  *
+ * @throws A filesystem path resolution error.
+ *
  * @example
  * ```ts
  * import { preMigrationBackupDirectory } from '@kevinjohn/adonisjs-sqlite-backup'

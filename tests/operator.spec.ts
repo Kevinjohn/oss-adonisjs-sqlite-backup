@@ -79,7 +79,7 @@ test.group('operatorDatabasePath', (group) => {
     ]) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
-        errors.E_BACKUP_SOURCE,
+        errors.E_BACKUP_OPERATOR_SOURCE,
         'Operator commands require an existing on-disk database'
       )
     }
@@ -220,7 +220,7 @@ test.group('withOperatorDatabase', (group) => {
     try {
       await assert.rejects(
         () => withOperatorDatabase(db, async () => assert.fail('entered')),
-        errors.E_BACKUP_LOCKED,
+        errors.E_BACKUP_OPERATOR_LOCKED,
         /Another process holds/
       )
     } finally {
@@ -655,14 +655,48 @@ test.group('withOperatorDatabase', (group) => {
       })
       assert.fail('Expected pool cleanup and native close failures')
     } catch (error) {
-      assert.instanceOf(error, AggregateError)
-      assert.include((error as AggregateError).errors, sentinel)
+      assert.instanceOf(error, errors.E_BACKUP_OPERATOR_CLEANUP)
+      const failure = error as InstanceType<typeof errors.E_BACKUP_OPERATOR_CLEANUP>
+      assert.lengthOf(failure.resourceCleanupErrors, 2)
+      assert.strictEqual(failure.cause, failure.resourceCleanupErrors[0])
+      assert.match(String(failure.resourceCleanupErrors[0]), /pool cleanup incomplete/)
+      assert.strictEqual(failure.resourceCleanupErrors[1], sentinel)
     } finally {
       handlePrototype.close = originalClose
       manager.closeAll = originalCloseAll
       await originalCloseAll()
     }
     assert.isFalse((handle as typeof handle & { open: boolean }).open)
+  })
+
+  test('reports a native handle left open after the pool reports successful cleanup', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    openDatabase(live).close()
+    const db = lucid(live)
+    const owner = db.connection().getWriteClient().client.pool as unknown as {
+      emitter: EventEmitter
+    }
+    const manager = db.manager as unknown as { closeAll(): Promise<void> }
+    const closeAll = manager.closeAll.bind(manager)
+    let handle: { open?: boolean } | undefined
+    manager.closeAll = async () => {
+      owner.emitter.emit('poolDestroySuccess')
+    }
+    try {
+      await assert.rejects(
+        () =>
+          withOperatorDatabase(db, async (borrowed) => {
+            handle = borrowed as typeof handle
+          }),
+        errors.E_BACKUP_OPERATOR_HANDLE_OPEN
+      )
+      assert.isFalse(handle?.open)
+    } finally {
+      manager.closeAll = closeAll
+      await closeAll()
+    }
   })
 
   test('closes an independently managed connection after first acquisition fails', async ({

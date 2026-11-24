@@ -78,7 +78,7 @@ test.group('review findings', (group) => {
       await readBackupErrorCode(() =>
         createBundle(prepared({ livePath: live, directory, now: () => T }))
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_BUNDLE_EXISTS'
     )
     assert.equal(readFileSync(join(directory, requireFormattedBundleName(T)), 'utf8'), 'not ours')
 
@@ -90,7 +90,7 @@ test.group('review findings', (group) => {
       await readBackupErrorCode(() =>
         createBundle(prepared({ livePath: live, directory, now: () => T + 5 }))
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_BUNDLE_EXISTS'
     )
     assert.isTrue(lstatSync(join(directory, requireFormattedBundleName(T + 5))).isSymbolicLink())
     assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'keep')
@@ -106,7 +106,7 @@ test.group('review findings', (group) => {
       await readBackupErrorCode(() =>
         createBundle(prepared({ livePath: live, directory, now: () => T }))
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_CLOCK_SKEW'
     )
     assert.isTrue(existsSync(stray))
     rmSync(stray, { recursive: true })
@@ -137,7 +137,7 @@ test.group('review findings', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'alias', 'app.db'), livePath: missingLive })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     assert.isFalse(existsSync(missingLive))
   })
@@ -183,28 +183,28 @@ test.group('review findings', (group) => {
     mkdirSync(join(directory, '.backup.lock'))
     assert.equal(
       await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_LOCK_FILE_TYPE'
     )
     rmSync(join(directory, '.backup.lock'), { recursive: true })
     // A symlinked lock file is refused: recovery must never truncate a file outside the folder.
     const precious = join(root, 'precious.txt')
     writeFileSync(precious, 'x'.repeat(8192))
     symlinkSync(precious, join(directory, '.backup.lock'))
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
     assert.equal(readFileSync(precious, 'utf8').length, 8192)
     rmSync(join(directory, '.backup.lock'))
     // Also when the outside file is a usable (empty) lock file: SQLite would lock it otherwise.
     const outside = join(root, 'outside.lock')
     writeFileSync(outside, '')
     symlinkSync(outside, join(directory, '.backup.lock'))
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
     rmSync(join(directory, '.backup.lock'))
 
     chmodSync(join(created.path, 'db.sqlite'), 0o600)
     unlinkSync(join(created.path, 'db.sqlite'))
     assert.equal(
       await readBackupErrorCode(() => verifyBundle(directory, created.name)),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_DATABASE_MISSING'
     )
   })
 
@@ -213,16 +213,19 @@ test.group('review findings', (group) => {
     const real = await createBundle(prepared({ livePath: live, directory }))
     const alias = requireFormattedBundleName(requireBundleTimestamp(real.name) + 1)
     symlinkSync(real.path, join(directory, alias))
-    assert.equal(await readBackupErrorCode(() => verifyBundle(directory, alias)), 'E_BACKUP_UNSAFE')
+    assert.equal(
+      await readBackupErrorCode(() => verifyBundle(directory, alias)),
+      'E_BACKUP_BUNDLE_FILE_TYPE'
+    )
     assert.equal(
       await readBackupErrorCode(() =>
         prepareRestore({ directory, name: alias, target: join(root, 's.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_BUNDLE_FILE_TYPE'
     )
   })
 
-  test('F7: a missing target folder is E_BACKUP_UNSAFE, not E_BACKUP_NOT_FOUND', async ({
+  test('F7: a missing target folder is E_BACKUP_TARGET_PARENT_MISSING, not E_BACKUP_NOT_FOUND', async ({
     assert,
   }) => {
     makeLiveDatabase(live).close()
@@ -231,7 +234,7 @@ test.group('review findings', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'missing', 's.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_PARENT_MISSING'
     )
   })
 
@@ -242,7 +245,7 @@ test.group('review findings', (group) => {
     symlinkSync(join(root, 'nowhere'), `${target}-wal`)
     assert.equal(
       await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_EXISTS'
     )
     assert.isFalse(existsSync(target))
   })
@@ -292,7 +295,7 @@ test.group('review findings', (group) => {
     }
     assert.equal(
       await readBackupErrorCode(() => verifyBundle(directory, b.name)),
-      'E_BACKUP_NOT_FOUND'
+      'E_BACKUP_BUNDLE_PRUNED'
     )
   })
 
@@ -334,7 +337,7 @@ test.group('rules the review found untested', (group) => {
     }
     assert.equal(
       await readBackupErrorCode(() => createBundle(prepared({ livePath: live, directory }))),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_VALIDATION_QUERY'
     )
     assert.deepEqual(listBundles(directory), [])
   })
@@ -346,7 +349,7 @@ test.group('rules the review found untested', (group) => {
       writeFileSync(`${target}${sidecar}`, 'stale')
       assert.equal(
         await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-        'E_BACKUP_UNSAFE'
+        'E_BACKUP_TARGET_EXISTS'
       )
     })
   }
@@ -388,7 +391,7 @@ test.group('rules the review found untested', (group) => {
       sqliteConfig(rollback)
     )
     strict.prepareDirectory()
-    assert.equal(await readBackupErrorCode(() => strict.create()), 'E_BACKUP_SOURCE')
+    assert.equal(await readBackupErrorCode(() => strict.create()), 'E_BACKUP_SOURCE_NOT_WAL')
     mkdirSync(directory, { recursive: true })
     const holder = await startChild('lock', directory, '300')
     try {
@@ -412,7 +415,7 @@ test.group('rules the review found untested', (group) => {
     writeFileSync(path, JSON.stringify({ ...b.manifest, format: 2 }))
     assert.equal(
       await readBackupErrorCode(() => verifyBundle(directory, b.name)),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_MANIFEST_SHAPE'
     )
   })
 
@@ -446,7 +449,7 @@ test.group('rules the review found untested', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, name: b.name, target, livePath: live })
       ),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_READY_MISSING'
     )
     assert.isFalse(existsSync(target))
   })
@@ -491,7 +494,7 @@ test.group('rules the review found untested', (group) => {
     const target = join(root, 's.db')
     assert.equal(
       await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_VALIDATION_QUERY'
     )
     assert.isFalse(existsSync(target))
   })

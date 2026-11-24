@@ -1,3 +1,4 @@
+import { errors } from '../index.js'
 import { prepared } from './helpers.js'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
@@ -14,7 +15,8 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { readDatabaseIntegrityProblem } from '../src/checks.js'
+import { defineConfig } from '../src/define_config.js'
+import { assertDatabaseIntegrity } from '../src/checks.js'
 import { acquireLock } from '../src/lock.js'
 import { internalHooks } from '../src/internal_hooks.js'
 import { requireFormattedBundleName } from '../src/names.js'
@@ -91,6 +93,22 @@ test.group('createBundle', (group) => {
     }
   })
 
+  test('archive preparation permits sources that can only use a borrowed handle', ({ assert }) => {
+    const directory = join(root, 'backups')
+    for (const [client, filename] of [
+      ['pg', 'unused.db'],
+      ['better-sqlite3', ':memory:'],
+      ['better-sqlite3', 'file:memory.db'],
+    ] as const) {
+      const backup = new SqliteBackup(defineConfig({ directory }), {
+        connection: 'main',
+        connections: { main: { client, connection: { filename } } },
+      })
+      assert.doesNotThrow(() => backup.prepareDirectory())
+    }
+    assert.isTrue(statSync(directory).isDirectory())
+  })
+
   test('owned reads refuse a source filename changed by the native driver', async ({ assert }) => {
     const ordinary = join(root, 'live.db')
     const spaced = `${ordinary} `
@@ -124,7 +142,7 @@ test.group('createBundle', (group) => {
       const error = await Promise.resolve()
         .then(check)
         .catch((caught: unknown) => caught)
-      assert.equal((error as { code?: string } | undefined)?.code, 'E_BACKUP_SOURCE')
+      assert.equal((error as { code?: string } | undefined)?.code, 'E_BACKUP_SOURCE_DRIVER_PATH')
       assert.match(String(error), /better-sqlite3 changes its filename/)
     }
     assert.deepEqual(readFileSync(spaced), spacedBytes)
@@ -297,13 +315,16 @@ test.group('createBundle', (group) => {
     }
   })
 
-  test('keeps a non-Error copy failure with a source close failure', async ({ assert }) => {
+  test('orders a non-Error copy failure before bundle removal and source close failures', async ({
+    assert,
+  }) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
     const prototype = Database.prototype as { close: (this: { name: string }) => void }
     const originalClose = prototype.close
     const closeFailure = new Error('source close failure')
+    const removalFailure = new Error('bundle removal failure')
     let source: { name: string } | undefined
     prototype.close = function () {
       if (this.name === live) {
@@ -314,13 +335,14 @@ test.group('createBundle', (group) => {
     }
     internalHooks.step = (step) => {
       if (step === 'create:copied') throw null
+      if (step === 'create:cleanup') throw removalFailure
     }
     try {
       const failure = await createBundle(prepared({ livePath: live, directory })).catch(
         (error: unknown) => error
       )
       assert.instanceOf(failure, AggregateError)
-      assert.deepEqual((failure as AggregateError).errors, [null, closeFailure])
+      assert.deepEqual((failure as AggregateError).errors, [null, removalFailure, closeFailure])
       assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
         closeFailure,
       ])
@@ -332,7 +354,7 @@ test.group('createBundle', (group) => {
     }
   })
 
-  test('aggregates multiple native cleanup failures after a completed copy', async ({ assert }) => {
+  test('reports ordered native cleanup failures after a completed copy', async ({ assert }) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
@@ -358,8 +380,8 @@ test.group('createBundle', (group) => {
       const failure = await createBundle({ livePath: live, directory }).catch(
         (error: unknown) => error
       )
-      assert.instanceOf(failure, AggregateError)
-      assert.deepEqual((failure as AggregateError).errors, [sourceFailure, lockFailure])
+      assert.instanceOf(failure, errors.E_BACKUP_CLEANUP)
+      assert.strictEqual((failure as Error).cause, sourceFailure)
       assert.deepEqual((failure as { resourceCleanupErrors: unknown[] }).resourceCleanupErrors, [
         sourceFailure,
         lockFailure,
@@ -434,16 +456,23 @@ test.group('createBundle', (group) => {
     }
   })
 
-  test('readDatabaseIntegrityProblem reports page corruption', async ({ assert }) => {
+  test('assertDatabaseIntegrity reports page corruption', async ({ assert }) => {
     const path = join(root, 'corrupt.db')
     makeLiveDatabase(path, { rows: 2000, wal: false }).close()
-    assert.isNull(readDatabaseIntegrityProblem(path))
+    assert.doesNotThrow(() => assertDatabaseIntegrity(path, 'source'))
     overwrite(path, 4096 * 40, 'zzzzzzzzzzzz') // page header, not row text
-    assert.isNotNull(readDatabaseIntegrityProblem(path))
-    assert.match(readDatabaseIntegrityProblem(join(root, 'missing.db'))!, /cannot open/)
+    assert.throws(
+      () => assertDatabaseIntegrity(path, 'source'),
+      /source: (integrity_check|check failed)/
+    )
+    assert.throws(
+      () => assertDatabaseIntegrity(join(root, 'missing.db'), 'source'),
+      errors.E_BACKUP_VALIDATION_OPEN,
+      /cannot open/
+    )
   })
 
-  test('readDatabaseIntegrityProblem reports an index that disagrees with its table', async ({
+  test('assertDatabaseIntegrity reports an index that disagrees with its table', async ({
     assert,
   }) => {
     const path = join(root, 'index.db')
@@ -458,9 +487,10 @@ test.group('createBundle', (group) => {
     db.close()
     // Change one key inside the index leaf: the file stays readable, integrity_check returns rows.
     overwrite(path, rootPage * 4096 - 8, 'zzzz')
-    assert.equal(
-      readDatabaseIntegrityProblem(path),
-      'integrity_check: row 1 missing from index small_k'
+    assert.throws(
+      () => assertDatabaseIntegrity(path, 'source'),
+      errors.E_BACKUP_INVALID,
+      /integrity_check: row 1 missing from index small_k/
     )
   })
 
@@ -474,7 +504,7 @@ test.group('createBundle', (group) => {
       await createBundle(prepared({ livePath: live, directory, requireWal: true }))
       assert.fail('should require WAL')
     } catch (error) {
-      assert.equal(code(error), 'E_BACKUP_SOURCE')
+      assert.equal(code(error), 'E_BACKUP_SOURCE_NOT_WAL')
     }
     assert.lengthOf(
       readdirSync(directory).filter((n) => n.startsWith('bak-')),
@@ -527,7 +557,7 @@ test.group('createBundle', (group) => {
       await createBundle(prepared({ livePath: join(root, 'missing.db'), directory }))
       assert.fail('should refuse')
     } catch (error) {
-      assert.equal(code(error), 'E_BACKUP_SOURCE')
+      assert.equal(code(error), 'E_BACKUP_SOURCE_MISSING')
     }
     assert.isFalse(existsSync(join(root, 'missing.db')))
   })

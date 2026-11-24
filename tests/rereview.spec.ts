@@ -62,7 +62,7 @@ test.group('re-review', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(data, 'db.sqlite3'), livePath: appPath })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     // A two-hop chain, relative links included.
     const hop = join(root, 'app', 'hop')
@@ -71,7 +71,7 @@ test.group('re-review', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(data, 'db.sqlite3'), livePath: hop })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     assert.isFalse(existsSync(join(data, 'db.sqlite3')))
     // A symlink loop is refused, not followed forever.
@@ -81,7 +81,7 @@ test.group('re-review', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 's.db'), livePath: join(root, 'loop-a') })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_PATH_SYMLINK_LIMIT'
     )
   })
 
@@ -111,7 +111,7 @@ test.group('re-review', (group) => {
     for (const target of [join(b.path, 'extra.db'), join(directory, 'staged.db')]) {
       assert.equal(
         await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-        'E_BACKUP_UNSAFE'
+        'E_BACKUP_TARGET_IN_ARCHIVE'
       )
       assert.isFalse(existsSync(target))
     }
@@ -175,7 +175,7 @@ test.group('re-review', (group) => {
         symlinkSync(victim, lockPath)
       }
     }
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
     assert.equal(readFileSync(victim, 'utf8'), 'keep me')
     // A FIFO swapped in is refused at once instead of blocking the open.
     unlinkSync(lockPath)
@@ -186,7 +186,7 @@ test.group('re-review', (group) => {
         execFileSync('mkfifo', [lockPath])
       }
     }
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_UNSAFE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
   }).timeout(10_000)
 
   test('P3: prune unpublishing between selection and the READY check is NOT_FOUND', async ({
@@ -200,6 +200,6 @@ test.group('re-review', (group) => {
         unlinkSync(join(b.path, 'READY'))
       }
     }
-    assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_NOT_FOUND')
+    assert.equal(await readBackupErrorCode(() => verifyBundle(directory)), 'E_BACKUP_BUNDLE_PRUNED')
   })
 })

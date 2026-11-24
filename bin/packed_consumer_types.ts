@@ -21,6 +21,15 @@ import { getCommand, getMetaData } from '@kevinjohn/adonisjs-sqlite-backup/comma
 import BackupProvider from '@kevinjohn/adonisjs-sqlite-backup/sqlite_backup_provider'
 import backup from '@kevinjohn/adonisjs-sqlite-backup/services/main'
 
+type UnexpectedOptions = {
+  [Code in BackupErrorCode]: Exclude<
+    keyof Extract<ConstructorParameters<(typeof errors)[Code]>[number], { cause?: unknown }>,
+    'cause'
+  >
+}[BackupErrorCode]
+const onlyCauseIsAccepted: UnexpectedOptions extends never ? true : false = true
+void onlyCauseIsAccepted
+
 void [configure, defineConfig, SqliteBackup, getCommand, getMetaData, BackupProvider]
 export function publicTypes(
   config: BackupConfigInput,

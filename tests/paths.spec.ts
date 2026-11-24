@@ -164,7 +164,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: real, livePath: appPath })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     assert.isFalse(existsSync(real))
   })
@@ -184,7 +184,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: real, livePath: join(root, 'app', 'db.sqlite3') })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     assert.isFalse(existsSync(real))
   })
@@ -206,7 +206,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: real, livePath: appPath })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_LIVE'
     )
     assert.isFalse(existsSync(real))
   })
@@ -230,7 +230,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'stage', 's.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_MOVED'
     )
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
   })
@@ -249,7 +249,7 @@ test.group('kernel-faithful paths', (group) => {
     }
     assert.equal(
       await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-      'E_BACKUP_INVALID'
+      'E_BACKUP_CHECKSUM_MISMATCH'
     )
     assert.equal(readFileSync(target, 'utf8'), 'someone else')
   })
@@ -311,7 +311,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory: folder, target, livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_IN_ARCHIVE'
     )
     assert.isFalse(existsSync(join(root, 'st', 'staged.db')))
     assert.isFalse(existsSync(join(root, 'x', 'staged.db')))
@@ -340,7 +340,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 't.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_EXISTS'
     )
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
   })
@@ -355,7 +355,7 @@ test.group('kernel-faithful paths', (group) => {
     for (const target of [`${join(root, 't.db')}/`, `${join(root, 'plain.db')}/`]) {
       assert.equal(
         await readBackupErrorCode(() => prepareRestore({ directory, target, livePath: live })),
-        'E_BACKUP_UNSAFE',
+        'E_BACKUP_TARGET_FOLDER',
         target
       )
     }
@@ -476,7 +476,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'stage', 's.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_MOVED'
     )
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
     assert.deepEqual(readdirSync(join(root, 'stage')), [])
@@ -499,7 +499,7 @@ test.group('kernel-faithful paths', (group) => {
       await readBackupErrorCode(() =>
         prepareRestore({ directory, target: join(root, 'stage', 's.db'), livePath: live })
       ),
-      'E_BACKUP_UNSAFE'
+      'E_BACKUP_TARGET_MOVED'
     )
     assert.deepEqual(readdirSync(join(root, 'elsewhere')), [])
   })

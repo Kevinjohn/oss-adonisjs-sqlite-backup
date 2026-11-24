@@ -1,6 +1,16 @@
 import { statSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
-import { E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
+import {
+  E_BACKUP_BORROWED_NOT_FILE_BACKED,
+  E_BACKUP_BORROWED_UNREADABLE,
+  E_BACKUP_SOURCE_CLIENT,
+  E_BACKUP_SOURCE_CONNECTION,
+  E_BACKUP_SOURCE_DRIVER_PATH,
+  E_BACKUP_SOURCE_MISSING,
+  E_BACKUP_SOURCE_NOT_FILE_BACKED,
+  E_BACKUP_SOURCE_URI,
+  E_BACKUP_UNSAFE,
+} from './errors.js'
 import { openDatabase, type NativeDatabase } from './native.js'
 import { resolveFilesystemPath } from './paths.js'
 import type { LucidDatabaseConfig } from './types.js'
@@ -15,7 +25,7 @@ export function normalizeConfiguredSqliteFilename(filename: string, client: stri
 /** Open a resolved, owned source only when the native driver will use that exact file path. */
 export function openOwnedSource(path: string): NativeDatabase {
   if (normalizeConfiguredSqliteFilename(path, 'better-sqlite3') !== path) {
-    throw new E_BACKUP_SOURCE(
+    throw new E_BACKUP_SOURCE_DRIVER_PATH(
       `live database ${JSON.stringify(path)} cannot be read: better-sqlite3 changes its filename when opening it`
     )
   }
@@ -24,6 +34,8 @@ export function openOwnedSource(path: string): NativeDatabase {
 
 /**
  * Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would.
+ *
+ * @throws A source connection, client, filename or filesystem path error.
  *
  * @example
  * ```ts
@@ -44,21 +56,21 @@ export function resolveSqliteSource(
   const name = connectionName ?? database?.connection
   const node = name ? database?.connections?.[name] : undefined
   if (!name || !node) {
-    throw new E_BACKUP_SOURCE(`Lucid connection "${name}" is not configured`)
+    throw new E_BACKUP_SOURCE_CONNECTION(`Lucid connection "${name}" is not configured`)
   }
   if (!SQLITE_CLIENTS.has(node.client)) {
-    throw new E_BACKUP_SOURCE(`connection "${name}" uses ${node.client}`)
+    throw new E_BACKUP_SOURCE_CLIENT(`connection "${name}" uses ${node.client}`)
   }
   const configuredFilename = (node.connection as { filename?: unknown } | undefined)?.filename
   if (typeof configuredFilename !== 'string') {
-    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
+    throw new E_BACKUP_SOURCE_NOT_FILE_BACKED(`connection "${name}" is not file-backed`)
   }
   const filename = normalizeConfiguredSqliteFilename(configuredFilename, node.client)
   if (filename === '' || filename === ':memory:') {
-    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
+    throw new E_BACKUP_SOURCE_NOT_FILE_BACKED(`connection "${name}" is not file-backed`)
   }
   if (/^file:/i.test(filename)) {
-    throw new E_BACKUP_SOURCE(`connection "${name}" uses a URI filename`)
+    throw new E_BACKUP_SOURCE_URI(`connection "${name}" uses a URI filename`)
   }
   return resolveFilesystemPath(filename)
 }
@@ -79,7 +91,7 @@ export function isWithin(parent: string, child: string): boolean {
 export function assertSafeLayout(livePath: string, directory: string): void {
   const stat = statSync(livePath, { throwIfNoEntry: false })
   if (!stat?.isFile()) {
-    throw new E_BACKUP_SOURCE(`live database ${livePath} is not an existing file`)
+    throw new E_BACKUP_SOURCE_MISSING(`live database ${livePath} is not an existing file`)
   }
   assertSourceOutsideDirectory(livePath, directory)
 }
@@ -96,10 +108,10 @@ export function requireBorrowedSourcePath(database: NativeDatabase): string {
   try {
     const files = database.pragma('database_list') as Array<{ name: string; file: string }>
     const filename = files.find((entry) => entry.name === 'main')?.file
-    if (!filename || /^file:/i.test(filename))
-      throw new E_BACKUP_SOURCE('source must be a file-backed SQLite database')
+    if (!filename || /^file:/i.test(filename)) throw new E_BACKUP_BORROWED_NOT_FILE_BACKED()
     return resolveFilesystemPath(filename)
   } catch (cause) {
-    throw new E_BACKUP_SOURCE('borrowed database cannot be read', { cause })
+    if (cause instanceof E_BACKUP_BORROWED_NOT_FILE_BACKED) throw cause
+    throw new E_BACKUP_BORROWED_UNREADABLE({ cause })
   }
 }

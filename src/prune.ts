@@ -2,7 +2,8 @@ import { existsSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { assertDirectory } from './directory.js'
 import { listBundleDirectoryNames } from './bundles.js'
-import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
+import { E_BACKUP_PRUNE_FINALIZE } from './errors.js'
 import { resolveFilesystemPath } from './paths.js'
 import { syncPath } from './fs.js'
 import { internalHooks } from './internal_hooks.js'
@@ -14,7 +15,7 @@ function attachProgress(error: unknown, progress: PruneProgress): Error {
   const failure =
     error instanceof Error && Object.isExtensible(error)
       ? error
-      : new RuntimeException(String(error), { cause: error })
+      : new E_BACKUP_PRUNE_FINALIZE(String(error), { cause: error })
   return Object.defineProperty(failure, 'pruneProgress', { value: progress })
 }
 
@@ -30,6 +31,9 @@ export function pruneKeepProblem(keep: number): string | undefined {
  * an unfinished bundle seen under the lock belongs to a create that crashed. Only directories
  * matching the bundle name pattern are ever touched. Per-item failures are returned in the result.
  * If finalization fails, the thrown error carries the observed `pruneProgress`.
+ *
+ * @throws `AggregateError` if non-Error work and lock cleanup both fail, with the primary failure first. Lock acquisition can also report this combination.
+ * @throws Invalid configuration, path, lock and finalization failures. Finalization errors carry observed prune progress.
  *
  * @example
  * ```ts
