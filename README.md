@@ -168,8 +168,12 @@ of the primary connection's database, then runs
   `@kevinjohn/adonisjs-sqlite-backup`. It resolves the configured directory and appends
   `pre-migration`, or resolves the database path and appends `.backups` when the directory is
   omitted or empty. The helper only resolves the destination. `db:upgrade` checks the layout,
-  prepares the directory and writes the pre-migration backup bundle there. Both destinations are
-  outside scheduled retention by `db:backup prune`.
+  prepares the directory and writes the pre-migration backup bundle there.
+- `db:backup prune` scans the immediate bundle directories in the configured archive root after
+  resolving symlinks. A distinct `pre-migration` child directory is outside that scan. If
+  `pre-migration` is a symlink to the archive root, the bundles written through it are subject to
+  retention. Bundles written to the fallback `<database>.backups` are also subject to retention
+  if you later configure that directory as the archive root.
 - The bundle records the primary connection's migrations table and follows the backup config's
   `lockTimeoutMs` and `requireWal`, like `db:backup create`.
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
