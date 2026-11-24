@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.3 - 2026-11-24
+
 - `db:upgrade` reports a failed migration as one `Upgrade failed: …` line, without a stack trace,
   and still exits 1 with the migration error in `error`. It runs the pending migrations with
   Lucid's migration runner instead of a nested `migration:run`, whose own failure output Ace
