@@ -354,6 +354,39 @@ test.group('createBundle', (group) => {
     }
   })
 
+  test('preserves a single source close failure after removing the completed copy', async ({
+    assert,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live).close()
+    const directory = join(root, 'b')
+    const input = prepared({ livePath: live, directory })
+    const prototype = Database.prototype as { close: (this: { name: string }) => void }
+    const originalClose = prototype.close
+    const sourceFailure = new Error('source close failed')
+    let failedHandle: { name: string } | undefined
+    let publishedPath: string | undefined
+    prototype.close = function () {
+      if (this.name === live) {
+        failedHandle = this
+        publishedPath = listBundles(directory)[0]?.path
+        throw sourceFailure
+      }
+      originalClose.call(this)
+    }
+    try {
+      const failure = await createBundle(input).catch((error: unknown) => error)
+      assert.strictEqual(failure, sourceFailure)
+      assert.isDefined(publishedPath)
+      assert.isFalse(existsSync(publishedPath!))
+      assert.deepEqual(readdirSync(directory), ['.backup.lock'])
+      acquireLock(directory).release()
+    } finally {
+      prototype.close = originalClose
+      if (failedHandle) originalClose.call(failedHandle)
+    }
+  })
+
   test('reports ordered native cleanup failures after a completed copy', async ({ assert }) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
