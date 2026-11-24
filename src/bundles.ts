@@ -27,11 +27,13 @@ import {
   E_BACKUP_JOURNAL_METADATA,
   E_BACKUP_JOURNAL_MISMATCH,
   E_BACKUP_MANIFEST_FILE_TYPE,
+  E_BACKUP_MANIFEST_JSON,
   E_BACKUP_MANIFEST_SHAPE,
   E_BACKUP_MANIFEST_UNREADABLE,
   E_BACKUP_NOT_FOUND,
   E_BACKUP_NO_READY_BUNDLE,
   E_BACKUP_READY_MISSING,
+  E_BACKUP_SIZE_MISMATCH,
   E_BACKUP_SOURCE,
   E_BACKUP_SOURCE_DRIVER_PATH,
   E_BACKUP_SOURCE_NOT_WAL,
@@ -152,6 +154,8 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
     }
     const manifest = JSON.parse(readFileSync(join(bundle.path, MANIFEST), 'utf8')) as BundleManifest
     if (
+      manifest === null ||
+      typeof manifest !== 'object' ||
       manifest.format !== 1 ||
       typeof manifest.sha256 !== 'string' ||
       typeof manifest.createdAt !== 'string' ||
@@ -164,6 +168,12 @@ export function readManifest(bundle: BundleLocation): BundleManifest {
   } catch (cause) {
     if (cause instanceof E_BACKUP_MANIFEST_FILE_TYPE || cause instanceof E_BACKUP_MANIFEST_SHAPE)
       throw cause
+    if (cause instanceof SyntaxError) {
+      throw new E_BACKUP_MANIFEST_JSON(
+        `bundle ${bundle.name} manifest is unreadable: invalid JSON`,
+        { cause }
+      )
+    }
     throw new E_BACKUP_MANIFEST_UNREADABLE(`bundle ${bundle.name} manifest is unreadable`, {
       cause,
     })
@@ -179,9 +189,13 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
       throw new E_BACKUP_DATABASE_FILE_TYPE(
         `${label}: database file cannot be read: expected a regular database file`
       )
-    matches = stat.size === manifest.bytes && hashFileSha256(path) === manifest.sha256
+    if (stat.size !== manifest.bytes) {
+      throw new E_BACKUP_SIZE_MISMATCH(`${label}: database size does not match manifest`)
+    }
+    matches = hashFileSha256(path) === manifest.sha256
   } catch (cause) {
-    if (cause instanceof E_BACKUP_DATABASE_FILE_TYPE) throw cause
+    if (cause instanceof E_BACKUP_DATABASE_FILE_TYPE || cause instanceof E_BACKUP_SIZE_MISMATCH)
+      throw cause
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new E_BACKUP_DATABASE_MISSING(`${label}: database file cannot be read`, { cause })
     }

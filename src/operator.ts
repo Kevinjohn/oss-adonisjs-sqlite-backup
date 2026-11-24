@@ -1,4 +1,4 @@
-import { existsSync, lstatSync } from 'node:fs'
+import { lstatSync } from 'node:fs'
 import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import type { Database } from '@adonisjs/lucid/database'
 import {
@@ -9,6 +9,9 @@ import {
   E_BACKUP_OPERATOR_HANDLE_OPEN,
   E_BACKUP_OPERATOR_LOCKED,
   E_BACKUP_OPERATOR_SOURCE,
+  E_BACKUP_SOURCE_MISSING,
+  E_BACKUP_SOURCE_NOT_FILE_BACKED,
+  E_BACKUP_SOURCE_URI,
 } from './errors.js'
 import type { NativeDatabase } from './native.js'
 import { normalizeConfiguredSqliteFilename } from './source.js'
@@ -18,7 +21,9 @@ import { normalizeConfiguredSqliteFilename } from './source.js'
  * database file it uses. Call it before opening any connection.
  * @throws InvalidArgumentsException `Refusing without --confirm-server-stopped` when the operator has not confirmed.
  * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
- * @throws E_BACKUP_OPERATOR_SOURCE when the database is in memory or is not an existing regular file.
+ * @throws E_BACKUP_SOURCE_NOT_FILE_BACKED or E_BACKUP_SOURCE_URI for an unsupported filename.
+ * @throws E_BACKUP_SOURCE_MISSING when the file is absent.
+ * @throws E_BACKUP_OPERATOR_SOURCE when the entry is not a regular file.
  *
  * @example
  * ```ts
@@ -43,15 +48,12 @@ export function operatorDatabasePath(db: Database, confirmServerStopped: boolean
     typeof configuredFilename === 'string'
       ? normalizeConfiguredSqliteFilename(configuredFilename, config.client)
       : ''
-  if (
-    !path ||
-    path === ':memory:' ||
-    /^file:/i.test(path) ||
-    !existsSync(path) ||
-    !lstatSync(path).isFile()
-  ) {
-    throw new E_BACKUP_OPERATOR_SOURCE()
-  }
+  const message = 'Operator commands require an existing on-disk database'
+  if (!path || path === ':memory:') throw new E_BACKUP_SOURCE_NOT_FILE_BACKED(message)
+  if (/^file:/i.test(path)) throw new E_BACKUP_SOURCE_URI(message)
+  const stat = lstatSync(path, { throwIfNoEntry: false })
+  if (!stat) throw new E_BACKUP_SOURCE_MISSING(message)
+  if (!stat.isFile()) throw new E_BACKUP_OPERATOR_SOURCE()
   return path
 }
 

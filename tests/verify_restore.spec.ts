@@ -143,6 +143,14 @@ test.group('verify and prepareRestore', (group) => {
     }
   })
 
+  test('verify reports a size mismatch even when the stored checksum is correct', ({ assert }) => {
+    const file = join(path, 'manifest.json')
+    const manifest = JSON.parse(readFileSync(file, 'utf8'))
+    chmodSync(file, 0o600)
+    writeFileSync(file, JSON.stringify({ ...manifest, bytes: manifest.bytes + 1 }))
+    assert.throws(() => verifyBundle(directory, name), errors.E_BACKUP_SIZE_MISMATCH, /size/)
+  })
+
   test('verify catches damage that only the checksum can see', async ({ assert }) => {
     const db = join(path, 'db.sqlite')
     const bytes = readFileSync(db)

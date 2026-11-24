@@ -6,8 +6,11 @@ import { prepared } from './helpers.js'
 import { test } from '@japa/runner'
 import {
   chmodSync,
+  closeSync,
+  constants,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
   symlinkSync,
   unlinkSync,
@@ -161,6 +164,24 @@ test.group('re-review', (group) => {
     held.release()
   })
 
+  test('reports when a damaged lock disappears before repair', async ({ assert }) => {
+    mkdirSync(directory)
+    const lockPath = join(directory, '.backup.lock')
+    writeFileSync(lockPath, 'not a database, but long enough to be read as a header....')
+    internalHooks.step = (step) => {
+      if (step === 'lock:damaged') unlinkSync(lockPath)
+    }
+    let failure: unknown
+    try {
+      acquireLock(directory)
+    } catch (error) {
+      failure = error
+    }
+    assert.instanceOf(failure, errors.E_BACKUP_LOCK_FILE_OPEN)
+    assert.propertyVal((failure as Error).cause as object, 'code', 'ENOENT')
+    assert.isFalse(existsSync(lockPath))
+  })
+
   test('P3: a lock file swapped for a symlink before truncation is refused, victim intact', async ({
     assert,
   }) => {
@@ -175,18 +196,27 @@ test.group('re-review', (group) => {
         symlinkSync(victim, lockPath)
       }
     }
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
+    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_OPEN')
     assert.equal(readFileSync(victim, 'utf8'), 'keep me')
-    // A FIFO swapped in is refused at once instead of blocking the open.
+    // Keep a reader open so repair opens the FIFO and rejects its descriptor type.
+    let reader: number | undefined
     unlinkSync(lockPath)
     writeFileSync(lockPath, 'not a database, but long enough to be read as a header....')
     internalHooks.step = (step) => {
       if (step === 'lock:damaged') {
         unlinkSync(lockPath)
         execFileSync('mkfifo', [lockPath])
+        reader = openSync(lockPath, constants.O_RDONLY | constants.O_NONBLOCK)
       }
     }
-    assert.equal(await readBackupErrorCode(() => acquireLock(directory)), 'E_BACKUP_LOCK_FILE_TYPE')
+    try {
+      assert.equal(
+        await readBackupErrorCode(() => acquireLock(directory)),
+        'E_BACKUP_LOCK_FILE_TYPE'
+      )
+    } finally {
+      if (reader !== undefined) closeSync(reader)
+    }
   }).timeout(10_000)
 
   test('P3: prune unpublishing between selection and the READY check is NOT_FOUND', async ({

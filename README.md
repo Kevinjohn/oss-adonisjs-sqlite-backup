@@ -151,7 +151,9 @@ connection-local SQL features on its verification connections.
 `listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
-with an unreadable manifest is `E_BACKUP_MANIFEST_UNREADABLE` and names the bundle.
+with a missing or unreadable manifest reports `E_BACKUP_MANIFEST_UNREADABLE` and names the
+bundle. Malformed JSON reports `E_BACKUP_MANIFEST_JSON`. Valid JSON with an invalid manifest
+shape reports `E_BACKUP_MANIFEST_SHAPE`.
 Listing checks the creation metadata without reading or hashing the database; verify and restore
 preparation check the expected size and hash against the bytes. The READY marker, manifest and
 database members must be regular files for recovery. A missing `sourceJournalMode` in an imported
@@ -277,6 +279,7 @@ Each exception has a distinct code and the command prints that code for package 
 | `errors.E_BACKUP_OPERATOR_LOCKED`   | Another connection holds the live database.                          |
 | `errors.E_BACKUP_SOURCE`            | The owned SQLite source cannot be read.                              |
 | `errors.E_BACKUP_INVALID`           | SQLite's integrity check found damage.                               |
+| `errors.E_BACKUP_SIZE_MISMATCH`     | The database byte count differs from the manifest.                   |
 | `errors.E_BACKUP_CHECKSUM_MISMATCH` | The database fails the manifest checksum.                            |
 | `errors.E_BACKUP_WRITE_INCOMPLETE`  | A write stalled before publication.                                  |
 | `errors.E_BACKUP_UNSAFE`            | The archive contains the live SQLite source.                         |
@@ -300,8 +303,9 @@ when it cannot remove the staged file it created.
 Stopped-server operator helpers report these preconditions and failures:
 
 - `operatorDatabasePath` throws `InvalidArgumentsException` when confirmation is missing or the
-  primary connection is incompatible. An unavailable on-disk database throws
-  `errors.E_BACKUP_OPERATOR_SOURCE`.
+  primary connection is incompatible. An unsupported filename throws
+  `errors.E_BACKUP_SOURCE_NOT_FILE_BACKED` or `errors.E_BACKUP_SOURCE_URI`. A missing file throws
+  `errors.E_BACKUP_SOURCE_MISSING`. A non-regular entry throws `errors.E_BACKUP_OPERATOR_SOURCE`.
 - `withOperatorDatabase` throws `RuntimeException` for an overlapping call on the same
   `Database` or an inconsistent pool state. When exclusive acquisition meets `SQLITE_BUSY`, it
   throws `errors.E_BACKUP_OPERATOR_LOCKED` with the native error as `cause` and advises stopping the server

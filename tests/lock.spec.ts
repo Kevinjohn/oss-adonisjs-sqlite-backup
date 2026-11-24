@@ -24,7 +24,11 @@ test.group('Directory lock', () => {
     try {
       writeFileSync(alias, 'keep these bytes')
       linkSync(alias, lockPath)
-      assert.throws(() => acquireLock(root), /singly linked regular file/)
+      assert.throws(
+        () => acquireLock(root),
+        errors.E_BACKUP_LOCK_FILE_LINKS,
+        /singly linked regular file/
+      )
       assert.equal(readFileSync(alias, 'utf8'), 'keep these bytes')
     } finally {
       cleanup()

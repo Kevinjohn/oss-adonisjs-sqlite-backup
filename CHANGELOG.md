@@ -17,7 +17,7 @@
   | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | `E_BACKUP_LOCKED`    | `errors.E_BACKUP_LOCKED` for archive contention, `errors.E_BACKUP_OPERATOR_LOCKED` for live database contention                                                                                                               |
   | `E_BACKUP_SOURCE`    | `errors.E_BACKUP_SOURCE` for unreadable owned sources, with distinct codes for connection settings, read failures on borrowed handles and source preconditions                                                                |
-  | `E_BACKUP_INVALID`   | `errors.E_BACKUP_INVALID` for SQLite integrity damage, with distinct codes for checksum, manifest, migration journal, foreign-key and write failures                                                                          |
+  | `E_BACKUP_INVALID`   | `errors.E_BACKUP_INVALID` for SQLite integrity damage, with distinct codes for size, checksum, manifest, migration journal, foreign-key and write failures                                                                    |
   | `E_BACKUP_UNSAFE`    | `errors.E_BACKUP_UNSAFE` for an archive containing the live database, with distinct codes for other path, layout and command input failures                                                                                   |
   | `E_BACKUP_NOT_FOUND` | `errors.E_BACKUP_NOT_FOUND` for a missing named bundle, `errors.E_BACKUP_NO_READY_BUNDLE` for an empty archive, `errors.E_BACKUP_ROOT_NOT_FOUND` for a missing root, and `errors.E_BACKUP_BUNDLE_PRUNED` for concurrent prune |
   | `E_BACKUP_DISABLED`  | `errors.E_BACKUP_DISABLED`                                                                                                                                                                                                    |
@@ -30,7 +30,8 @@
 - Malformed backup configuration and invalid API arguments for retention or lock timeout now
   throw AdonisJS's `InvalidArgumentsException`. Missing backup configuration throws
   AdonisJS's `RuntimeException`. Operator guards use framework exceptions for invalid arguments
-  and pool setup, `errors.E_BACKUP_OPERATOR_SOURCE` for a missing on-disk source, and
+  and pool setup, source codes for unsupported filenames and missing files,
+  `errors.E_BACKUP_OPERATOR_SOURCE` for non-regular entries, and
   `errors.E_BACKUP_OPERATOR_LOCKED` for exclusive-lock contention.
 - Add TypeScript examples to the public API documentation.
 

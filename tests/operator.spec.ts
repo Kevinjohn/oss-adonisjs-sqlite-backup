@@ -69,17 +69,17 @@ test.group('operatorDatabasePath', (group) => {
 
   test('refuses an in-memory, missing or non-file database', ({ assert }) => {
     mkdirSync(join(root, 'directory.db'))
-    for (const filename of [
-      ':memory:',
-      ' :memory: ',
-      ' ',
-      join(root, 'missing.db'),
-      join(root, 'directory.db'),
-      'file:memory.db',
-    ]) {
+    for (const [filename, exception] of [
+      [':memory:', errors.E_BACKUP_SOURCE_NOT_FILE_BACKED],
+      [' :memory: ', errors.E_BACKUP_SOURCE_NOT_FILE_BACKED],
+      [' ', errors.E_BACKUP_SOURCE_NOT_FILE_BACKED],
+      [join(root, 'missing.db'), errors.E_BACKUP_SOURCE_MISSING],
+      [join(root, 'directory.db'), errors.E_BACKUP_OPERATOR_SOURCE],
+      ['file:memory.db', errors.E_BACKUP_SOURCE_URI],
+    ] as const) {
       assert.throws(
         () => operatorDatabasePath(configured(sqlite(filename)), true),
-        errors.E_BACKUP_OPERATOR_SOURCE,
+        exception,
         'Operator commands require an existing on-disk database'
       )
     }
@@ -89,6 +89,7 @@ test.group('operatorDatabasePath', (group) => {
           configured({ ...sqlite(join(root, 'live.db')), connection: { filename: 7 } }),
           true
         ),
+      errors.E_BACKUP_SOURCE_NOT_FILE_BACKED,
       'Operator commands require an existing on-disk database'
     )
   })

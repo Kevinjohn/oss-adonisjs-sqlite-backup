@@ -303,11 +303,16 @@ test.group('host adoption contracts', (group) => {
       await readBackupErrorCode(() => listBundles(directory)),
       'E_BACKUP_MANIFEST_UNREADABLE'
     )
-    writeFileSync(join(second.path, 'manifest.json'), '{')
-    assert.equal(
-      await readBackupErrorCode(() => listBundles(directory)),
-      'E_BACKUP_MANIFEST_UNREADABLE'
-    )
+    const manifestPath = join(second.path, 'manifest.json')
+    writeFileSync(manifestPath, '{')
+    assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_MANIFEST_JSON')
+    for (const malformed of ['null', '{}']) {
+      writeFileSync(manifestPath, malformed)
+      assert.equal(
+        await readBackupErrorCode(() => listBundles(directory)),
+        'E_BACKUP_MANIFEST_SHAPE'
+      )
+    }
     writeFileSync(
       join(second.path, 'manifest.json'),
       JSON.stringify({ ...second.manifest, createdAt: 'invalid' })

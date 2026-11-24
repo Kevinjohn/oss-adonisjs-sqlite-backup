@@ -200,6 +200,18 @@ export class BackupBundlePrunedException extends Exception {
 
 export const E_BACKUP_BUNDLE_PRUNED = BackupBundlePrunedException
 
+export class BackupSizeMismatchException extends Exception {
+  static code = 'E_BACKUP_SIZE_MISMATCH' as const
+  static status = 500
+  declare code: typeof BackupSizeMismatchException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, causeOnly(options))
+  }
+}
+
+export const E_BACKUP_SIZE_MISMATCH = BackupSizeMismatchException
+
 export class BackupChecksumMismatchException extends Exception {
   static code = 'E_BACKUP_CHECKSUM_MISMATCH' as const
   static status = 500
@@ -368,6 +380,18 @@ export class BackupManifestFileTypeException extends Exception {
 }
 
 export const E_BACKUP_MANIFEST_FILE_TYPE = BackupManifestFileTypeException
+
+export class BackupManifestJsonException extends Exception {
+  static code = 'E_BACKUP_MANIFEST_JSON' as const
+  static status = 500
+  declare code: typeof BackupManifestJsonException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, causeOnly(options))
+  }
+}
+
+export const E_BACKUP_MANIFEST_JSON = BackupManifestJsonException
 
 export class BackupManifestShapeException extends Exception {
   static code = 'E_BACKUP_MANIFEST_SHAPE' as const
@@ -892,6 +916,7 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_LOCK_FILE_TYPE.code,
   E_BACKUP_LOCK_RELEASE.code,
   E_BACKUP_MANIFEST_FILE_TYPE.code,
+  E_BACKUP_MANIFEST_JSON.code,
   E_BACKUP_MANIFEST_SHAPE.code,
   E_BACKUP_MANIFEST_UNREADABLE.code,
   E_BACKUP_NO_READY_BUNDLE.code,
@@ -911,6 +936,7 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_ROOT_FILE_TYPE.code,
   E_BACKUP_ROOT_NOT_FOUND.code,
   E_BACKUP_ROOT_UNSAFE.code,
+  E_BACKUP_SIZE_MISMATCH.code,
   E_BACKUP_SOURCE_CLIENT.code,
   E_BACKUP_SOURCE_CONNECTION.code,
   E_BACKUP_SOURCE_DRIVER_PATH.code,

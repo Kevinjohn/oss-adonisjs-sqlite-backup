@@ -76,13 +76,14 @@ function truncateLockFile(path: string): void {
   try {
     fd = openSync(path, constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   } catch (cause) {
-    throw new E_BACKUP_LOCK_FILE_TYPE(`lock path ${path} is not a regular file`, {
+    throw new E_BACKUP_LOCK_FILE_OPEN(`cannot open damaged lock file ${path}`, {
       cause,
     })
   }
   try {
     const stat = fstatSync(fd)
-    if (!stat.isFile() || stat.nlink !== 1) {
+    if (!stat.isFile()) throw new E_BACKUP_LOCK_FILE_TYPE(`lock path ${path} is not a regular file`)
+    if (stat.nlink !== 1) {
       throw new E_BACKUP_LOCK_FILE_LINKS(`lock path ${path} must be a singly linked regular file`)
     }
     ftruncateSync(fd, 0)
