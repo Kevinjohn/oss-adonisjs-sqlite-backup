@@ -90,6 +90,16 @@ if (backup.config.directory) {
 }
 ```
 
+`backup.livePath()` returns the resolved live database path. Call it on the default service from
+`@kevinjohn/adonisjs-sqlite-backup/services/main`, or on an instance of `SqliteBackup` exported from
+`@kevinjohn/adonisjs-sqlite-backup`. It requires a non-empty backup directory in the service
+configuration and throws `E_BACKUP_DISABLED` before looking up the source if the directory is
+absent or empty. It reads Lucid's connection configuration on each call, using the `connection`
+setting from `config/backup.ts` when set and Lucid's default connection otherwise. An unconfigured
+connection, a client other than `better-sqlite3`, `sqlite3` or `sqlite`, or a missing, non-string,
+empty, in-memory or URI filename yields `E_BACKUP_SOURCE`. The resolved file may be missing. Use
+`backup.checkSource()` to check that SQLite can open and read it.
+
 With backups disabled, the application still boots and `list`, `verify` and `prepareRestore`
 read a recovery directory passed explicitly. With backups enabled, an unreadable source or an
 unsafe root still throws from `checkSource()` or `prepareDirectory()` and stops startup.
@@ -154,10 +164,12 @@ The `db:upgrade` Ace command (`node ace db:upgrade`) creates a verified pre-migr
 of the primary connection's database, then runs
 `migration:run --force`. Register `@adonisjs/lucid/commands` as well as this package's commands.
 
-- The pre-migration backup bundle goes to `pre-migration` under the configured backup directory, or to
-  `<database>.backups` beside the database when no backup directory is configured. These bundles
-  are outside `db:backup prune`. `preMigrationBackupDirectory(dbPath, configuredDirectory)` returns
-  the same path.
+- `preMigrationBackupDirectory(dbPath, configuredDirectory?)` is exported from
+  `@kevinjohn/adonisjs-sqlite-backup`. It resolves the configured directory and appends
+  `pre-migration`, or resolves the database path and appends `.backups` when the directory is
+  omitted or empty. The helper only resolves the destination. `db:upgrade` checks the layout,
+  prepares the directory and writes the pre-migration backup bundle there. Both destinations are
+  outside scheduled retention by `db:backup prune`.
 - The bundle records the primary connection's migrations table and follows the backup config's
   `lockTimeoutMs` and `requireWal`, like `db:backup create`.
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated
@@ -186,9 +198,15 @@ The operator must actually stop the server before running these commands. Confir
 operator precondition, not an automatic server-status probe; the exclusive-lock acquisition checks
 database contention separately.
 
-- `operatorDatabasePath(db, confirmServerStopped)` refuses unless the operator confirmed (for
-  example with a `--confirm-server-stopped` flag), the primary connection is `better-sqlite3` with a
-  pool of one, and the database is an existing file. It returns the file path.
+- `operatorDatabasePath(db, confirmServerStopped)` is exported from
+  `@kevinjohn/adonisjs-sqlite-backup`. Call it before opening a connection. It requires operator
+  confirmation, a Lucid primary connection configured with `better-sqlite3` and `pool.max: 1`, and
+  an existing regular database file. It returns the configured filename with surrounding whitespace
+  trimmed, preserving relative paths. Missing, non-string or empty filenames, `:memory:`, `file:`
+  URI filenames and paths ending in a symlink are refused. The corresponding diagnostics are
+  `Refusing without --confirm-server-stopped`,
+  `Operator commands require the configured single-connection SQLite pool` and
+  `Operator commands require an existing on-disk database`.
 - `withOperatorDatabase(db, work)` keeps the primary pool's only handle checked out in EXCLUSIVE
   locking mode through `work(connection)`, then attempts to close every managed connection. Lucid
   queries and transactions on the primary connection borrow that handle in sequence. An overlapping
