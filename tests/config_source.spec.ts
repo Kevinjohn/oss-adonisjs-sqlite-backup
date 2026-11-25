@@ -83,11 +83,14 @@ test.group('config and source resolution', () => {
         resolveSqliteSource(config)
         assert.fail(`accepted ${JSON.stringify(config)}`)
       } catch (error) {
-        assert.instanceOf(error, errors.E_BACKUP_SOURCE)
-        assert.propertyVal(error as object, 'code', 'E_BACKUP_SOURCE')
+        assert.instanceOf(error, InvalidArgumentsException)
       }
     }
-    assert.throws(() => resolveSqliteSource(sqlite('/a.db'), 'missing'), /not configured/)
+    assert.throws(
+      () => resolveSqliteSource(sqlite('/a.db'), 'missing'),
+      InvalidArgumentsException,
+      /not configured/
+    )
   })
 
   test('public backup errors keep distinct classes, codes, messages and causes', ({ assert }) => {
@@ -97,6 +100,7 @@ test.group('config and source resolution', () => {
       ['E_BACKUP_LOCKED', new errors.E_BACKUP_LOCKED(detail, { cause }), detail],
       ['E_BACKUP_SOURCE', new errors.E_BACKUP_SOURCE(detail, { cause }), detail],
       ['E_BACKUP_INVALID', new errors.E_BACKUP_INVALID(detail, { cause }), detail],
+      ['E_BACKUP_WRITE', new errors.E_BACKUP_WRITE(detail, { cause }), detail],
       ['E_BACKUP_UNSAFE', new errors.E_BACKUP_UNSAFE(detail, { cause }), detail],
       ['E_BACKUP_NOT_FOUND', new errors.E_BACKUP_NOT_FOUND(detail, { cause }), detail],
       ['E_BACKUP_DISABLED', new errors.E_BACKUP_DISABLED({ cause }), 'backups are disabled'],

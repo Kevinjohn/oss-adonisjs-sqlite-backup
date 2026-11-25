@@ -37,9 +37,8 @@ When they are disabled, those calls throw `E_BACKUP_DISABLED`, so the startup ex
 the resolved `backup.config.directory` first. `backup.prepareDirectory()` refuses a root that
 contains the configured live SQLite database with `E_BACKUP_UNSAFE`, before creating or changing
 anything. Otherwise preparation creates missing directories and tightens an existing directory to
-mode `0700`; an existing non-directory root is refused. The standalone `prepareDirectory(path)`
-has no live database to compare and does not make that check. The
-manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
+mode `0700`; an existing non-directory root is refused. The standalone `archive.prepareDirectory()`
+takes only the archive path. The manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
 If prune fails while syncing the archive or releasing its lock, the command exits nonzero and
@@ -68,8 +67,8 @@ configuration and throws `E_BACKUP_DISABLED` before looking up the source if the
 absent or empty. It reads Lucid's connection configuration on each call, using the `connection`
 setting from `config/backup.ts` when set and Lucid's default connection otherwise. An unconfigured
 connection, a client other than `better-sqlite3`, `sqlite3` or `sqlite`, or a missing, non-string,
-empty, in-memory or URI filename yields `E_BACKUP_SOURCE`. The resolved file may be missing. Use
-`backup.checkSource()` to check that SQLite can open and read it.
+empty, in-memory or URI filename throws AdonisJS’s `InvalidArgumentsException`. The resolved file
+may be missing. Use `backup.checkSource()` to check that SQLite can open and read it.
 
 With backups disabled, the application still boots and `list`, `verify` and `prepareRestore`
 read a recovery directory passed explicitly. With backups enabled, an unreadable source or an
@@ -86,16 +85,32 @@ provide an archive directory that does not contain a live database.
 Create, prune and restore preparation refuse roots writable by group or others with
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
 
-Standalone hosts can import `prepareDirectory(path)`, `createBundle`, `listBundles`,
-`verifyBundle`, `pruneBundles` and `prepareRestore`. `createBundle` accepts either `livePath` or
-`source: { database }`, a better-sqlite3 handle. The latter works while an operator holds an
-exclusive lock. Borrowed handles remain open on success and failure; the package closes only
-handles it opens. The service also accepts `backup.create({ database })`.
+The examples below use the standalone classes in the unreleased source. For the published
+0.5.0 API, see the [README at v0.5.0](../../tree/v0.5.0#readme).
 
-Standalone callers can also import `acquireLock(directory, timeoutMs)` to coordinate their own
-work with package backup operations. The caller must provide an existing private directory on a
+Standalone hosts can select an archive directly with `BackupArchive`. Create accepts exactly one
+of `livePath` or `source: { database }`, a better-sqlite3 handle. Borrowed handles stay open on
+success and failure, including when the caller holds the source database exclusively. The
+configured service also accepts `backup.create({ database })`.
+
+```ts
+import { BackupArchive } from '@kevinjohn/adonisjs-sqlite-backup'
+
+const archive = new BackupArchive('storage/backups')
+const livePath = 'storage/orchard.sqlite'
+archive.prepareDirectory()
+const bundle = await archive.create({ livePath })
+archive.verify(bundle.name)
+const staged = archive.prepareRestore({
+  livePath,
+  name: bundle.name,
+  target: 'storage/recovered.sqlite',
+})
+```
+
+Use `archive.acquireLock(timeoutMs)` to coordinate host work with package backup operations. The caller must provide an existing private directory on a
 local filesystem and keep its ancestors writable only by trusted users or sticky, as described
-under Limits. The direct function does not check root privacy. Keep the returned lock object
+under Limits. The method assumes the directory is already private. Keep the returned lock object
 referenced until `release()`. The `.backup.lock` file contains no application data. Damaged-lock
 repair refuses multiply linked files before truncation; do not create hard-link aliases to it.
 
@@ -106,7 +121,7 @@ better-sqlite3 handles remain supported and are not closed by the package.
 
 When the source has a migration journal, the complete rows captured immediately before copying
 must match the copy. The backup reads SQLite through a single SQLite read snapshot.
-`createBundle` defaults to `migrationsTable: 'adonis_schema'`; the service
+`archive.create()` defaults to `migrationsTable: 'adonis_schema'`; the service
 uses the selected Lucid connection's `migrations.tableName` when supplied. The optional format-1
 manifest field `migrations: { table, count, last }` records the journal's row count and last name.
 Verify and restore preparation check that metadata against the copy. Databases without the table
@@ -118,7 +133,7 @@ that depends on them may fail verification when the missing feature is exercised
 package refuses to publish the bundle. The package has no initialiser hook for registering
 connection-local SQL features on its verification connections.
 
-`listBundles` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
+`archive.list()` returns `{ name, path, createdAt }`, with ISO creation time read from the manifest.
 Name order remains creation order even after a backward clock step; take the maximum `createdAt`
 for the newest recorded clock time. Concurrently removed publications are skipped. A READY bundle
 with an unreadable manifest is `E_BACKUP_INVALID` and names the bundle.
@@ -129,7 +144,7 @@ format-1 manifest is tolerated for compatibility; it is not used to establish re
 
 ## Commands
 
-Pass the operation as the first argument to the `db:backup` Ace command.
+Pass the `operation` argument first to the `db:backup` Ace command.
 
 | Command                                                            | What it does                                                                                     | Lock |
 | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---- |
@@ -163,11 +178,9 @@ of the primary connection's database, then runs the pending migrations with Luci
 runner, as `migration:run --force` would. Schema generation uses the Lucid command loader
 registered during [setup](#install).
 
-- `preMigrationBackupDirectory(dbPath, configuredDirectory?)` is exported from
-  `@kevinjohn/adonisjs-sqlite-backup`. It resolves the configured directory and appends
-  `pre-migration`, or resolves the database path and appends `.backups` when the directory is
-  omitted or empty. The helper only resolves the destination. `db:upgrade` checks the layout,
-  prepares the directory and writes the pre-migration backup bundle there.
+- The command resolves the configured backup directory and appends `pre-migration`. With an
+  omitted or empty directory, it resolves the database path and appends `.backups`. It checks the
+  layout, prepares the destination and writes the pre-migration backup bundle there.
 - `db:backup prune` scans the immediate bundle directories in the configured archive root after
   resolving symlinks. A distinct `pre-migration` child directory is outside that scan. If
   `pre-migration` is a symlink to the archive root, the bundles written through it are subject to
@@ -197,14 +210,13 @@ if (upgrade.exitCode !== 0) {
 
 ## Stopped-server operator commands
 
-Three exports support commands that must own the database while the server is stopped:
+`OperatorDatabase` supports commands that need exclusive access to the database.
 
 The operator must actually stop the server before running these commands. Confirmation is an
 operator precondition, not an automatic server-status probe; the exclusive-lock acquisition checks
 database contention separately.
 
-- `operatorDatabasePath(db, confirmServerStopped)` is exported from
-  `@kevinjohn/adonisjs-sqlite-backup`. Call it before opening a connection. It requires operator
+- `operator.databasePath(confirmServerStopped)` checks preconditions before the command opens a connection. It requires operator
   confirmation, a Lucid primary connection configured with `better-sqlite3` and `pool.max: 1`, and
   an existing regular database file. It returns the configured filename with surrounding whitespace
   trimmed, preserving relative paths. Missing, non-string or empty filenames, `:memory:`, `file:`
@@ -212,7 +224,7 @@ database contention separately.
   `Refusing without --confirm-server-stopped`,
   `Operator commands require the configured single-connection SQLite pool` and
   `Operator commands require an existing on-disk database`.
-- `withOperatorDatabase(db, work)` keeps the primary pool's only handle checked out in EXCLUSIVE
+- `operator.run(work)` keeps the primary pool's only handle checked out in EXCLUSIVE
   locking mode through `work(connection)`, then attempts to close every managed connection. Lucid
   queries and transactions on the primary connection borrow that handle in sequence. An overlapping
   call on the same `Database` is refused before taking cleanup ownership. Actual `SQLITE_BUSY`
@@ -222,17 +234,19 @@ database contention separately.
   lifecycle failures emitted by Lucid and the pool. When work and cleanup both fail, an
   `AggregateError` preserves the failures in order. The callback must finish its transactions and
   leave the borrowed handle open.
-- `syncPath(path)` fsyncs a file or directory.
 
 ```ts
 import db from '@adonisjs/lucid/services/db'
-import { operatorDatabasePath, withOperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
+import { OperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
 
-operatorDatabasePath(db, this.confirmServerStopped)
-await withOperatorDatabase(db, async () => {
+const operator = new OperatorDatabase(db)
+operator.databasePath(this.confirmServerStopped)
+await operator.run(async () => {
   await db.from('heroes').where('name', 'Clark Kent').update({ alias: 'Superman' })
 })
 ```
+
+See [standalone API adoption](DECISIONS.md#updating-callers) for previous export names and their replacements.
 
 ## Restoring
 
@@ -267,29 +281,32 @@ try {
 | Exception                   | When it is thrown                                                                            |
 | --------------------------- | -------------------------------------------------------------------------------------------- |
 | `errors.E_BACKUP_LOCKED`    | Another process or an earlier operation on the same event loop holds the lock.               |
-| `errors.E_BACKUP_SOURCE`    | The SQLite source is unsupported, unavailable, or fails a source check.                      |
-| `errors.E_BACKUP_INVALID`   | Verification failed, or a partial write prevented publication.                               |
+| `errors.E_BACKUP_SOURCE`    | The SQLite database is unavailable or fails an operation’s source check.                     |
+| `errors.E_BACKUP_INVALID`   | A bundle or copy failed verification.                                                        |
+| `errors.E_BACKUP_WRITE`     | A file write made no progress before bundle publication.                                     |
 | `errors.E_BACKUP_UNSAFE`    | A path, layout, or operation failed a safety check. A write may already have been attempted. |
 | `errors.E_BACKUP_NOT_FOUND` | The backup directory or selected bundle is missing.                                          |
 | `errors.E_BACKUP_DISABLED`  | Backups are disabled. Pass an explicit directory for recovery reads.                         |
 
-Invalid API arguments such as a negative lock timeout or a retention count below one throw
-AdonisJS's `InvalidArgumentsException`. Unexpected system errors such as a full disk can
-propagate as native errors. A backup exception includes the underlying error as its `cause`
-when it wraps one.
+Invalid Lucid source settings and invalid API arguments such as a negative lock timeout or a
+retention count below one throw AdonisJS’s `InvalidArgumentsException`. Unexpected system errors
+such as a full disk can propagate as native errors. A backup exception includes the underlying
+error as its `cause` when it wraps one.
 
 If create fails and removing its unfinished bundle also fails, the original `Error` is rethrown
 with the cleanup failure on its `cleanupError` property. The command prints the original failure
 and a separate cleanup-failure line, then exits 1. An unfinished bundle is never a recovery point;
 a later successful prune removes it. Restore preparation attaches `cleanupError` in the same way
-when it cannot remove the staged file it created.
+when it cannot remove the staged file it created. If lock acquisition and native close both
+fail, Ace reports the acquisition failure first and the close separately. The thrown
+`AggregateError` retains both original values in order.
 
 Stopped-server operator helpers report these preconditions and failures:
 
-- `operatorDatabasePath` throws `InvalidArgumentsException` when confirmation is missing or the
+- `operator.databasePath()` throws `InvalidArgumentsException` when confirmation is missing or the
   primary connection is incompatible. An unavailable on-disk database throws
   `errors.E_BACKUP_SOURCE`.
-- `withOperatorDatabase` throws `RuntimeException` for an overlapping call on the same
+- `operator.run()` throws `RuntimeException` for an overlapping call on the same
   `Database` or an inconsistent pool state. When exclusive acquisition meets `SQLITE_BUSY`, it
   throws `errors.E_BACKUP_LOCKED` with the native error as `cause` and advises stopping the server
   before retrying. Other lock setup errors retain their native type.

@@ -6,6 +6,15 @@
   `db:upgrade`.
 - Preserve command errors for callers while reporting backup and upgrade failures once.
 
+- Breaking: replace standalone backup and operator functions with `BackupArchive` and
+  `OperatorDatabase`. See the [caller mapping](DECISIONS.md#updating-callers).
+- Breaking: `SqliteBackup` keeps its Lucid database configuration private. Ace names the first
+  `db:backup` argument `operation` in command metadata and help. Existing positional invocations
+  use the same operation values.
+- Breaking: missing, unsupported or non-file Lucid source settings throw AdonisJS’s
+  `InvalidArgumentsException`. A write that makes no progress throws `E_BACKUP_WRITE`.
+- Ace reports a lock-acquisition failure separately from a native cleanup failure.
+
 ## 0.5.0 - 2026-11-24
 
 - `db:upgrade` reports a failed migration as one `Upgrade failed: …` line, without a stack trace,

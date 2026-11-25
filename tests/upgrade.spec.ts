@@ -24,7 +24,7 @@ import { readManifest, verifyBundle } from '../src/bundles.ts'
 import { defineConfig } from '../src/define_config.ts'
 import type { BackupConfigInput } from '../src/types.ts'
 import { openDatabase } from '../src/native.ts'
-import { preMigrationBackupDirectory } from '../index.ts'
+import { preMigrationBackupDirectory } from '../src/upgrade.ts'
 import DbUpgrade from '../commands/db_upgrade.ts'
 import { startChild, stopChild, createTemporaryRoot } from './helpers.ts'
 

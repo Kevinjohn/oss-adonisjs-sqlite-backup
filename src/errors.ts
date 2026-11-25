@@ -33,6 +33,17 @@ export class BackupInvalidException extends Exception {
   }
 }
 
+/** A durable file write made no progress. */
+export class BackupWriteException extends Exception {
+  static code = 'E_BACKUP_WRITE' as const
+  static status = 500
+  declare code: typeof BackupWriteException.code
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, { cause: options?.cause })
+  }
+}
+
 /** The request failed a path, layout or operation safety check. */
 export class BackupUnsafeException extends Exception {
   static code = 'E_BACKUP_UNSAFE' as const
@@ -70,6 +81,7 @@ export class BackupDisabledException extends Exception {
 export const E_BACKUP_LOCKED = BackupLockedException
 export const E_BACKUP_SOURCE = BackupSourceException
 export const E_BACKUP_INVALID = BackupInvalidException
+export const E_BACKUP_WRITE = BackupWriteException
 export const E_BACKUP_UNSAFE = BackupUnsafeException
 export const E_BACKUP_NOT_FOUND = BackupNotFoundException
 export const E_BACKUP_DISABLED = BackupDisabledException
@@ -81,6 +93,7 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_LOCKED.code,
   E_BACKUP_SOURCE.code,
   E_BACKUP_INVALID.code,
+  E_BACKUP_WRITE.code,
   E_BACKUP_UNSAFE.code,
   E_BACKUP_NOT_FOUND.code,
   E_BACKUP_DISABLED.code,

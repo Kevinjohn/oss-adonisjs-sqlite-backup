@@ -1,6 +1,6 @@
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
-import { errors } from '../index.ts'
+import { errors, OperatorDatabase } from '../index.ts'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
@@ -9,7 +9,6 @@ import { performance } from 'node:perf_hooks'
 import { createBundle, verifyBundle } from '../src/bundles.ts'
 import { prepareDirectory } from '../src/directory.ts'
 import { openDatabase } from '../src/native.ts'
-import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.ts'
 import { countItems, makeLiveDatabase, createTemporaryRoot } from './helpers.ts'
 
 function configured(config: unknown) {
@@ -25,7 +24,7 @@ const sqlite = (filename: string, max = 1) => ({
   pool: { max },
 })
 
-test.group('operatorDatabasePath', (group) => {
+test.group('OperatorDatabase.databasePath', (group) => {
   let root: string
   group.each.setup(() => {
     const temp = createTemporaryRoot()
@@ -36,8 +35,8 @@ test.group('operatorDatabasePath', (group) => {
   test('returns the file of a single-connection better-sqlite3 pool', ({ assert }) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
-    assert.equal(operatorDatabasePath(configured(sqlite(live)), true), live)
-    assert.equal(operatorDatabasePath(configured(sqlite(` ${live} `)), true), live)
+    assert.equal(new OperatorDatabase(configured(sqlite(live))).databasePath(true), live)
+    assert.equal(new OperatorDatabase(configured(sqlite(` ${live} `))).databasePath(true), live)
   })
 
   test('refuses without the operator confirmation, before reading any configuration', ({
@@ -45,7 +44,7 @@ test.group('operatorDatabasePath', (group) => {
   }) => {
     const unreadable = { primaryConnectionName: 'sqlite' } as unknown as Database
     assert.throws(
-      () => operatorDatabasePath(unreadable, false),
+      () => new OperatorDatabase(unreadable).databasePath(false),
       InvalidArgumentsException,
       'Refusing without --confirm-server-stopped'
     )
@@ -61,7 +60,7 @@ test.group('operatorDatabasePath', (group) => {
       undefined,
     ]) {
       assert.throws(
-        () => operatorDatabasePath(configured(config), true),
+        () => new OperatorDatabase(configured(config)).databasePath(true),
         'Operator commands require the configured single-connection SQLite pool'
       )
     }
@@ -78,17 +77,16 @@ test.group('operatorDatabasePath', (group) => {
       'file:memory.db',
     ]) {
       assert.throws(
-        () => operatorDatabasePath(configured(sqlite(filename)), true),
+        () => new OperatorDatabase(configured(sqlite(filename))).databasePath(true),
         errors.E_BACKUP_SOURCE,
         'Operator commands require an existing on-disk database'
       )
     }
     assert.throws(
       () =>
-        operatorDatabasePath(
-          configured({ ...sqlite(join(root, 'live.db')), connection: { filename: 7 } }),
-          true
-        ),
+        new OperatorDatabase(
+          configured({ ...sqlite(join(root, 'live.db')), connection: { filename: 7 } })
+        ).databasePath(true),
       'Operator commands require an existing on-disk database'
     )
   })
@@ -136,7 +134,7 @@ function replica(db: Database) {
   return { manager, connection }
 }
 
-test.group('withOperatorDatabase', (group) => {
+test.group('OperatorDatabase.run', (group) => {
   let root: string
   group.each.setup(() => {
     const temp = createTemporaryRoot()
@@ -150,7 +148,7 @@ test.group('withOperatorDatabase', (group) => {
     seed.exec('CREATE TABLE heroes (name TEXT)')
     seed.close()
     const db = lucid(live)
-    const result = await withOperatorDatabase(db, async (handle) => {
+    const result = await new OperatorDatabase(db).run(async (handle) => {
       handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('pinned')")
       const other = openDatabase(live, { timeout: 0 })
       try {
@@ -181,7 +179,7 @@ test.group('withOperatorDatabase', (group) => {
     prepareDirectory(directory)
     const db = lucid(live)
     let borrowed!: ReturnType<typeof openDatabase>
-    const result = await withOperatorDatabase(db, async (handle) => {
+    const result = await new OperatorDatabase(db).run(async (handle) => {
       borrowed = handle as typeof borrowed
       const other = openDatabase(live, { timeout: 0 })
       try {
@@ -219,7 +217,7 @@ test.group('withOperatorDatabase', (group) => {
     const db = lucid(live)
     try {
       await assert.rejects(
-        () => withOperatorDatabase(db, async () => assert.fail('entered')),
+        () => new OperatorDatabase(db).run(async () => assert.fail('entered')),
         errors.E_BACKUP_LOCKED,
         /Another process holds/
       )
@@ -230,7 +228,7 @@ test.group('withOperatorDatabase', (group) => {
     const idle = openDatabase(live)
     const next = lucid(live)
     try {
-      assert.equal(await withOperatorDatabase(next, async () => 'entered'), 'entered')
+      assert.equal(await new OperatorDatabase(next).run(async () => 'entered'), 'entered')
     } finally {
       idle.close()
     }
@@ -244,7 +242,7 @@ test.group('withOperatorDatabase', (group) => {
       used: unknown[]
       check(): void
     }
-    await withOperatorDatabase(db, async (handle) => {
+    await new OperatorDatabase(db).run(async (handle) => {
       const client = db.connection().getWriteClient().client as unknown as {
         pool: { used: unknown[]; check(): void }
       }
@@ -268,7 +266,7 @@ test.group('withOperatorDatabase', (group) => {
     const live = join(root, 'live.db')
     openDatabase(live).close()
     const db = lucid(live, { maxConnectionLifetimeMillis: 50 })
-    await withOperatorDatabase(db, async (handle) => {
+    await new OperatorDatabase(db).run(async (handle) => {
       handle.exec("CREATE TEMP TABLE marker (value TEXT); INSERT INTO marker VALUES ('same')")
       ;(handle as typeof handle & { __knexLifetimeLimit: number }).__knexLifetimeLimit =
         performance.now() - 1
@@ -288,7 +286,7 @@ test.group('withOperatorDatabase', (group) => {
     seed.exec('CREATE TABLE heroes (name TEXT)')
     seed.close()
     const db = lucid(live)
-    await withOperatorDatabase(db, async () => {
+    await new OperatorDatabase(db).run(async () => {
       const trx = await db.transaction()
       await trx.table('heroes').insert({ name: 'rolled back' })
       const client = db.connection().getWriteClient().client as unknown as {
@@ -333,7 +331,7 @@ test.group('withOperatorDatabase', (group) => {
     const knex = db.connection().getWriteClient().client as unknown as { destroy(): Promise<void> }
     const original = knex.destroy.bind(knex)
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         knex.destroy = async () => {
           throw failure
@@ -363,7 +361,7 @@ test.group('withOperatorDatabase', (group) => {
         done()
       },
     })
-    await withOperatorDatabase(db, async () => {
+    await new OperatorDatabase(db).run(async () => {
       allowed = false
       await assert.rejects(
         () => db.table('heroes').insert({ name: 'forbidden' }),
@@ -400,7 +398,7 @@ test.group('withOperatorDatabase', (group) => {
         done()
       },
     })
-    await withOperatorDatabase(db, async () => {
+    await new OperatorDatabase(db).run(async () => {
       reject = true
       try {
         await db.table('heroes').insert({ name: 'forbidden' })
@@ -444,7 +442,7 @@ test.group('withOperatorDatabase', (group) => {
       },
     })
     try {
-      await withOperatorDatabase(db, async () => 'done')
+      await new OperatorDatabase(db).run(async () => 'done')
       assert.fail('Expected read shutdown failure')
     } catch (error) {
       assert.equal(error, sentinel)
@@ -471,7 +469,7 @@ test.group('withOperatorDatabase', (group) => {
     })
     Object.defineProperty(read, 'destroy', { configurable: true, value: async () => {} })
     try {
-      await assert.rejects(() => withOperatorDatabase(db, async () => 'done'), /replica.*read/)
+      await assert.rejects(() => new OperatorDatabase(db).run(async () => 'done'), /replica.*read/)
       assert.isTrue(writeCompleted)
       assert.isTrue(connection.ready)
       assert.equal(connection.listenerCount('disconnect:error'), 0)
@@ -489,7 +487,7 @@ test.group('withOperatorDatabase', (group) => {
     const completed: string[] = []
     connection.client.client.pool.on('poolDestroySuccess', () => completed.push('write'))
     connection.readClient.client.pool.on('poolDestroySuccess', () => completed.push('read'))
-    assert.equal(await withOperatorDatabase(db, async () => 'done'), 'done')
+    assert.equal(await new OperatorDatabase(db).run(async () => 'done'), 'done')
     assert.deepEqual(completed, ['write', 'read'])
     assert.equal(connection.listenerCount('disconnect:error'), 0)
   })
@@ -506,13 +504,13 @@ test.group('withOperatorDatabase', (group) => {
     const started = new Promise<void>((resolve) => {
       entered = resolve
     })
-    const first = withOperatorDatabase(db, async () => {
+    const first = new OperatorDatabase(db).run(async () => {
       entered()
       await held
     })
     await started
     try {
-      await assert.rejects(() => withOperatorDatabase(db, async () => {}), /already using/)
+      await assert.rejects(() => new OperatorDatabase(db).run(async () => {}), /already using/)
     } finally {
       resume()
       await first
@@ -530,7 +528,7 @@ test.group('withOperatorDatabase', (group) => {
     }
     await assert.rejects(
       () =>
-        withOperatorDatabase(db, async (handle) => {
+        new OperatorDatabase(db).run(async (handle) => {
           assert.isTrue(owner.release(handle))
         }),
       /refused the handle release/
@@ -551,7 +549,7 @@ test.group('withOperatorDatabase', (group) => {
     const original = knex.destroyRawConnection.bind(knex)
     let handle!: ReturnType<typeof openDatabase>
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         knex.destroyRawConnection = async () => {
           throw destroy
@@ -586,7 +584,7 @@ test.group('withOperatorDatabase', (group) => {
       if (this !== owner) throw sentinel
     }
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         return 'complete work'
       })
@@ -616,7 +614,7 @@ test.group('withOperatorDatabase', (group) => {
       throw sentinel
     }
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         return 'complete work'
       })
@@ -649,7 +647,7 @@ test.group('withOperatorDatabase', (group) => {
       originalClose.call(this)
     }
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         return 'complete work'
       })
@@ -681,7 +679,7 @@ test.group('withOperatorDatabase', (group) => {
       throw sentinel
     }
     try {
-      await withOperatorDatabase(db, async () => assert.fail('Callback entered'))
+      await new OperatorDatabase(db).run(async () => assert.fail('Callback entered'))
       assert.fail('Expected first checkout failure')
     } catch (error) {
       assert.equal(error, sentinel)
@@ -704,7 +702,7 @@ test.group('withOperatorDatabase', (group) => {
       throw cleanup
     }
     try {
-      await withOperatorDatabase(db, async () => {
+      await new OperatorDatabase(db).run(async () => {
         throw work
       })
       assert.fail('Expected both failures')
@@ -728,7 +726,7 @@ test.group('withOperatorDatabase', (group) => {
     let handle!: ReturnType<typeof openDatabase>
     manager.closeAll = async () => {}
     try {
-      await withOperatorDatabase(db, async (borrowed) => {
+      await new OperatorDatabase(db).run(async (borrowed) => {
         handle = borrowed as typeof handle
         throw work
       })
@@ -755,7 +753,7 @@ test.group('withOperatorDatabase', (group) => {
       },
     })
     await assert.rejects(
-      () => withOperatorDatabase(db, async () => assert.fail('entered')),
+      () => new OperatorDatabase(db).run(async () => assert.fail('entered')),
       /transaction/
     )
   })

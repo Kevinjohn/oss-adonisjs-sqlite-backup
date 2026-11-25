@@ -17,17 +17,6 @@ const existsIncludingDanglingSymlink = (path: string) =>
  * Stage a verified copy of a bundle at `target`. Never touches the live database and never swaps
  * it in: stopping the app and switching files is host policy. Lock-free, so it cannot starve
  * creates; a bundle pruned mid-copy fails the checksum and nothing is left behind.
- *
- * @example
- * ```ts
- * import { prepareRestore } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const staged = prepareRestore({
- *   directory: 'storage/backups',
- *   livePath: 'storage/orchard.sqlite',
- *   target: 'storage/recovered.sqlite',
- * })
- * ```
  */
 export function prepareRestore(input: {
   directory: string

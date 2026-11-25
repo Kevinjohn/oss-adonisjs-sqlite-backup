@@ -1,3 +1,4 @@
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { createBundle, listBundles, verifyBundle } from './bundles.ts'
 import { prepareDirectory } from './directory.ts'
 import { E_BACKUP_DISABLED, E_BACKUP_SOURCE } from './errors.ts'
@@ -27,10 +28,14 @@ import type { BackupConfig, LucidDatabaseConfig } from './types.ts'
  * ```
  */
 export class SqliteBackup {
+  #database: LucidDatabaseConfig | undefined
+
   constructor(
     readonly config: BackupConfig,
-    protected database: LucidDatabaseConfig | undefined
-  ) {}
+    database: LucidDatabaseConfig | undefined
+  ) {
+    this.#database = database
+  }
 
   #requireBackupDirectory(override?: string): string {
     const directory = override ?? this.config.directory
@@ -48,7 +53,7 @@ export class SqliteBackup {
    */
   livePath(): string {
     this.#requireBackupDirectory()
-    return resolveSqliteSource(this.database, this.config.connection)
+    return resolveSqliteSource(this.#database, this.config.connection)
   }
 
   /**
@@ -101,14 +106,14 @@ export class SqliteBackup {
    */
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
     const directory = this.#requireBackupDirectory()
-    const connection = this.config.connection ?? this.database?.connection
+    const connection = this.config.connection ?? this.#database?.connection
     return createBundle({
       ...(options.database
         ? { source: { database: options.database } }
         : { livePath: this.livePath() }),
       directory,
       migrationsTable: connection
-        ? this.database?.connections[connection]?.migrations?.tableName
+        ? this.#database?.connections[connection]?.migrations?.tableName
         : undefined,
       lockTimeoutMs: this.config.lockTimeoutMs,
       requireWal: this.config.requireWal,
@@ -152,17 +157,17 @@ export class SqliteBackup {
     return prepareRestore({
       ...input,
       directory: this.#requireBackupDirectory(input.directory),
-      livePath: resolveSqliteSource(this.database, this.config.connection),
+      livePath: resolveSqliteSource(this.#database, this.config.connection),
     })
   }
 
   #rejectLiveDatabaseInside(directory: string): void {
     let livePath: string | undefined
     try {
-      livePath = resolveSqliteSource(this.database, this.config.connection)
+      livePath = resolveSqliteSource(this.#database, this.config.connection)
     } catch (error) {
       // A service can create backups from borrowed handles without a configured file source.
-      if (!(error instanceof E_BACKUP_SOURCE)) throw error
+      if (!(error instanceof InvalidArgumentsException)) throw error
     }
     if (livePath !== undefined) assertSourceOutsideDirectory(livePath, directory)
   }

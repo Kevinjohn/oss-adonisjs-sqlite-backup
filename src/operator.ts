@@ -5,48 +5,6 @@ import { E_BACKUP_LOCKED, E_BACKUP_SOURCE } from './errors.ts'
 import type { NativeDatabase } from './native.ts'
 import { normalizeConfiguredSqliteFilename } from './source.ts'
 
-/**
- * Checks that a stopped-server operator command may open the primary connection, and returns the
- * database file it uses. Call it before opening any connection.
- * @throws InvalidArgumentsException `Refusing without --confirm-server-stopped` when the operator has not confirmed.
- * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
- * @throws E_BACKUP_SOURCE when the database is in memory or is not an existing regular file.
- *
- * @example
- * ```ts
- * import { operatorDatabasePath } from '@kevinjohn/adonisjs-sqlite-backup'
- * import db from '@adonisjs/lucid/services/db'
- *
- * // Run after the operator confirms that the server is stopped.
- * const livePath = operatorDatabasePath(db, true)
- * ```
- */
-export function operatorDatabasePath(db: Database, confirmServerStopped: boolean): string {
-  if (!confirmServerStopped)
-    throw new InvalidArgumentsException('Refusing without --confirm-server-stopped')
-  const config = db.getRawConnection(db.primaryConnectionName)?.config
-  if (config?.client !== 'better-sqlite3' || config.pool?.max !== 1) {
-    throw new InvalidArgumentsException(
-      'Operator commands require the configured single-connection SQLite pool'
-    )
-  }
-  const configuredFilename = (config.connection as { filename?: unknown } | undefined)?.filename
-  const path =
-    typeof configuredFilename === 'string'
-      ? normalizeConfiguredSqliteFilename(configuredFilename, config.client)
-      : ''
-  if (
-    !path ||
-    path === ':memory:' ||
-    /^file:/i.test(path) ||
-    !existsSync(path) ||
-    !lstatSync(path).isFile()
-  ) {
-    throw new E_BACKUP_SOURCE('Operator commands require an existing on-disk database')
-  }
-  return path
-}
-
 type Handle = NativeDatabase & { open: boolean; __knex__disposed?: boolean }
 type Pool = {
   constructor: new (options: Record<string, unknown>) => Pool
@@ -68,42 +26,94 @@ type Managed = {
   readClient?: { client?: { pool?: Pool } }
 }
 
-const activeOperators = new WeakSet<Database>()
-
 /**
- * Run on the primary connection's pinned native handle, then attempt to close all managed Lucid
- * connections. The callback must finish its transactions and leave the borrowed handle open.
- * Concurrent calls on the same Database are refused before cleanup ownership is taken.
- * Only SQLITE_BUSY during exclusive-lock acquisition receives stopped-server advice; other
- * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
- * both fail, AggregateError contains the work failure first and cleanup failures in observation
- * order.
+ * Access to the primary SQLite connection for a stopped-server operator command.
  *
  * @example
  * ```ts
- * import { createBundle, operatorDatabasePath, prepareDirectory, withOperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
+ * import { OperatorDatabase } from '@kevinjohn/adonisjs-sqlite-backup'
  * import db from '@adonisjs/lucid/services/db'
  *
- * // Run after the operator confirms that the server is stopped.
- * operatorDatabasePath(db, true)
- * const bundle = await withOperatorDatabase(db, async (database) => {
- *   prepareDirectory('storage/backups')
- *   return createBundle({ source: { database }, directory: 'storage/backups' })
+ * const operator = new OperatorDatabase(db)
+ * operator.databasePath(this.confirmServerStopped)
+ * await operator.run(async () => {
+ *   await db.from('items').where('id', 1).update({ body: 'repaired' })
  * })
  * ```
- * @throws AggregateError when operator work and cleanup both fail, or when multiple cleanup steps fail.
  */
-export async function withOperatorDatabase<T>(
-  db: Database,
-  run: (connection: NativeDatabase) => Promise<T>
-): Promise<T> {
-  if (activeOperators.has(db))
-    throw new RuntimeException('An operator command is already using this database')
-  activeOperators.add(db)
-  try {
-    return await runOperatorDatabase(db, run)
-  } finally {
-    activeOperators.delete(db)
+export class OperatorDatabase {
+  static #activeOperators = new WeakSet<Database>()
+  #database: Database
+
+  constructor(database: Database) {
+    this.#database = database
+  }
+
+  /**
+   * Checks that a stopped-server operator command may open the primary connection, and returns the
+   * database file it uses. Call it before opening any connection.
+   * @throws InvalidArgumentsException `Refusing without --confirm-server-stopped` when the operator has not confirmed.
+   * @throws InvalidArgumentsException when the primary connection is not better-sqlite3 with a pool of one.
+   * @throws E_BACKUP_SOURCE when the database is in memory or is not an existing regular file.
+   *
+   * @example
+   * ```ts
+   * const livePath = operator.databasePath(true)
+   * ```
+   */
+  databasePath(confirmServerStopped: boolean): string {
+    if (!confirmServerStopped)
+      throw new InvalidArgumentsException('Refusing without --confirm-server-stopped')
+    const config = this.#database.getRawConnection(this.#database.primaryConnectionName)?.config
+    if (config?.client !== 'better-sqlite3' || config.pool?.max !== 1) {
+      throw new InvalidArgumentsException(
+        'Operator commands require the configured single-connection SQLite pool'
+      )
+    }
+    const configuredFilename = (config.connection as { filename?: unknown } | undefined)?.filename
+    const path =
+      typeof configuredFilename === 'string'
+        ? normalizeConfiguredSqliteFilename(configuredFilename, config.client)
+        : ''
+    if (
+      !path ||
+      path === ':memory:' ||
+      /^file:/i.test(path) ||
+      !existsSync(path) ||
+      !lstatSync(path).isFile()
+    ) {
+      throw new E_BACKUP_SOURCE('Operator commands require an existing on-disk database')
+    }
+    return path
+  }
+
+  /**
+   * Run on the primary connection's pinned native handle, then attempt to close all managed Lucid
+   * connections. The callback must finish its transactions and leave the borrowed handle open.
+   * Concurrent calls on the same Database are refused before cleanup ownership is taken.
+   * Only SQLITE_BUSY during exclusive-lock acquisition receives stopped-server advice; other
+   * failures retain their meaning. An isolated work or cleanup failure is thrown unchanged. When
+   * both fail, AggregateError contains the work failure first and cleanup failures in observation
+   * order.
+   *
+   * @example
+   * ```ts
+   * const bundle = await operator.run(async (database) => {
+   *   archive.prepareDirectory()
+   *   return archive.create({ source: { database } })
+   * })
+   * ```
+   * @throws AggregateError when operator work and cleanup both fail, or when multiple cleanup steps fail.
+   */
+  async run<T>(run: (connection: NativeDatabase) => Promise<T>): Promise<T> {
+    if (OperatorDatabase.#activeOperators.has(this.#database))
+      throw new RuntimeException('An operator command is already using this database')
+    OperatorDatabase.#activeOperators.add(this.#database)
+    try {
+      return await runOperatorDatabase(this.#database, run)
+    } finally {
+      OperatorDatabase.#activeOperators.delete(this.#database)
+    }
   }
 }
 

@@ -29,7 +29,13 @@ import {
 } from './names.ts'
 import { openDatabase, type NativeDatabase } from './native.ts'
 import { assertSafeLayout, requireBorrowedSourcePath, openOwnedSource } from './source.ts'
-import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.ts'
+import type {
+  BundleLocation,
+  BundleManifest,
+  BundleSummary,
+  CreateBundleOptions,
+  CreateResult,
+} from './types.ts'
 
 /** A clock-step allowance: a newest bundle further ahead of the clock than this is refused. */
 export const MAX_FUTURE_MS = 24 * 60 * 60 * 1000
@@ -53,13 +59,6 @@ export function listBundleDirectoryNames(directory: string): string[] {
 
 /**
  * Published bundles only (READY present), oldest first. Name order is creation order.
- *
- * @example
- * ```ts
- * import { listBundles } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const bundles = listBundles('storage/backups')
- * ```
  */
 export function listBundles(folder: string): BundleSummary[] {
   const directory = resolveFilesystemPath(folder)
@@ -165,13 +164,6 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
 /**
  * Re-verify a published bundle in place. Lock-free: if prune unpublishes the bundle while it is
  * being checked, the result is E_BACKUP_NOT_FOUND, not a false E_BACKUP_INVALID.
- *
- * @example
- * ```ts
- * import { verifyBundle } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const verified = verifyBundle('storage/backups')
- * ```
  */
 export function verifyBundle(folder: string, name?: string): BundleLocation {
   const directory = resolveFilesystemPath(folder)
@@ -197,32 +189,12 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
 /**
  * Online copy -> full checks -> manifest -> READY last, all under the directory lock.
  * A bundle without READY is not a backup; prune removes it once nobody holds the lock.
- *
- * @example
- * ```ts
- * import { createBundle, prepareDirectory } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * prepareDirectory('storage/backups')
- * const bundle = await createBundle({
- *   livePath: 'storage/orchard.sqlite',
- *   directory: 'storage/backups',
- * })
- * ```
  * @throws AggregateError propagated from lock acquisition or release, or created if bundle
  * creation throws a non-Error value and cleanup fails, or if multiple native cleanup steps fail
  * after successful creation.
  */
 export async function createBundle(
-  input: (
-    | { livePath: string; source?: never }
-    | { source: { database: NativeDatabase }; livePath?: never }
-  ) & {
-    directory: string
-    migrationsTable?: string
-    lockTimeoutMs?: number
-    requireWal?: boolean
-    now?: () => number
-  }
+  input: CreateBundleOptions & { directory: string }
 ): Promise<CreateResult> {
   const { lockTimeoutMs = 0, requireWal = false, now = Date.now } = input
   const borrowed = input.source?.database

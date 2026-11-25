@@ -54,7 +54,15 @@ function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
       if (error instanceof Error) {
         Object.defineProperty(error, 'resourceCleanupErrors', { value: [closeError] })
       } else {
-        throw new AggregateError([error, closeError], 'lock acquisition and close failed')
+        const failure = new AggregateError(
+          [error, closeError],
+          'lock acquisition and close failed',
+          {
+            cause: error,
+          }
+        )
+        Object.defineProperty(failure, 'resourceCleanupErrors', { value: [closeError] })
+        throw failure
       }
     }
     throw error
@@ -91,18 +99,6 @@ function truncateLockFile(path: string): void {
  * The lock file never holds data, so a damaged (non-empty, non-SQLite) one is truncated and the
  * lock retried. That is safe: nobody can hold a lock on a damaged file, and truncating the empty
  * file another process has just locked changes nothing.
- *
- * @example
- * ```ts
- * import { acquireLock, listBundles } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const lock = acquireLock('storage/backups')
- * try {
- *   const bundles = listBundles('storage/backups')
- * } finally {
- *   lock.release()
- * }
- * ```
  * @throws AggregateError propagated from native lock acquisition.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
@@ -159,7 +155,10 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
           Object.defineProperty(rollbackError, 'resourceCleanupErrors', { value: [closeError] })
           throw rollbackError
         }
-        throw new AggregateError([rollbackError, closeError], 'lock release failed')
+        const failures = [rollbackError, closeError]
+        const combined = new AggregateError(failures, 'lock release failed')
+        Object.defineProperty(combined, 'resourceCleanupErrors', { value: failures })
+        throw combined
       }
       if (rollbackFailed) throw rollbackError
       if (closeFailed) throw closeError

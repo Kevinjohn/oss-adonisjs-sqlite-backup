@@ -1,3 +1,5 @@
+import type { NativeDatabase } from './native.ts'
+
 /** Options accepted by `defineConfig` in `config/backup.ts`. */
 export interface BackupConfigInput {
   /** Lucid connection to back up. Defaults to the primary connection (`database.connection`). */
@@ -49,6 +51,16 @@ export interface BundleLocation {
 /** A READY bundle with its manifest creation time. */
 export interface BundleSummary extends BundleLocation {
   createdAt: string
+}
+
+/** Standalone copy options for a path or a borrowed native SQLite handle. */
+export type CreateBundleOptions = (
+  { livePath: string; source?: never } | { source: { database: NativeDatabase }; livePath?: never }
+) & {
+  migrationsTable?: string
+  lockTimeoutMs?: number
+  requireWal?: boolean
+  now?: () => number
 }
 
 /** Result of `create`. */

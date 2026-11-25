@@ -8,7 +8,7 @@ import Database from 'better-sqlite3'
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { RuntimeException } from '@adonisjs/core/exceptions'
+import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { defineConfig as defineDatabaseConfig } from '@adonisjs/lucid'
@@ -33,11 +33,12 @@ import {
 interface BootAppOptions {
   withBackupConfig?: boolean | 'disabled'
   backupDirectory?: string
+  backupConnection?: string
 }
 
 async function bootApp(
   root: string,
-  { withBackupConfig = true, backupDirectory }: BootAppOptions = {}
+  { withBackupConfig = true, backupDirectory, backupConnection }: BootAppOptions = {}
 ) {
   const live = join(root, 'live.db')
   const ignitor = new IgnitorFactory()
@@ -58,6 +59,7 @@ async function bootApp(
         ...(withBackupConfig
           ? {
               backup: defineConfig({
+                connection: backupConnection,
                 directory:
                   withBackupConfig === 'disabled' ? '' : (backupDirectory ?? join(root, 'backups')),
               }),
@@ -79,6 +81,27 @@ async function bootApp(
   await app.start(() => {})
   return { app, live }
 }
+
+test('Ace preserves the framework exception for an unconfigured backup connection', async ({
+  assert,
+}) => {
+  const { root, cleanup } = createTemporaryRoot()
+  const { app } = await bootApp(root, { backupConnection: 'missing' })
+  try {
+    const ace = await app.container.make('ace')
+    ace.ui.switchMode('raw')
+    const command = await ace.exec('db:backup', ['create'])
+    command.assertFailed()
+    assert.instanceOf(command.error, InvalidArgumentsException)
+    command.assertLogMatches(
+      /db:backup create failed: Lucid connection "missing" is not configured/
+    )
+    assert.isFalse(existsSync(join(root, 'backups')))
+  } finally {
+    await app.terminate()
+    cleanup()
+  }
+})
 
 test('refused implicit create leaves an unsafe root permission unchanged', async ({ assert }) => {
   const { root, cleanup } = createTemporaryRoot()
@@ -227,7 +250,7 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     assert.equal(countItems(target), 1)
   }).timeout(30_000)
 
-  test('command errors: unknown action, missing target, rollback-journal warning', async ({
+  test('command errors: unknown operation, missing target, rollback-journal warning', async ({
     assert,
   }) => {
     const db = await app.container.make('lucid.db')
@@ -238,10 +261,10 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     unknown.assertFailed()
     assert.equal(unknown.error?.code, 'E_BACKUP_UNSAFE')
     assert.lengthOf(
-      ace.ui.logger.getLogs().filter((log) => log.message.includes('unknown action')),
+      ace.ui.logger.getLogs().filter((log) => log.message.includes('unknown operation')),
       1
     )
-    unknown.assertLogMatches(/E_BACKUP_UNSAFE: unknown action/)
+    unknown.assertLogMatches(/E_BACKUP_UNSAFE: unknown operation/)
     const noTarget = await ace.exec('db:backup', ['restore-prepare'])
     noTarget.assertFailed()
     noTarget.assertLogMatches(/E_BACKUP_UNSAFE: restore-prepare needs --target/)
@@ -253,7 +276,7 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     create.assertLogMatches(/journal_mode=delete/)
     const verify = await ace.exec('db:backup', ['verify', '--bundle', 'nope'])
     verify.assertFailed()
-    // A flag for another action is refused, never ignored: prune --bundle must not prune by keep.
+    // A flag for another operation is refused, never ignored: prune --bundle must not prune by keep.
     for (const [argv, message] of [
       [['prune', '--bundle', 'nope'], /--bundle is only supported for verify and restore-prepare/],
       [
@@ -496,18 +519,18 @@ test('disabled provider boots; commands recover from an explicit directory and r
     const disabled = await ace.exec('db:backup', ['create'])
     disabled.assertFailed()
     disabled.assertLogMatches(/E_BACKUP_DISABLED/)
-    for (const action of ['list', 'verify', 'restore-prepare']) {
+    for (const operation of ['list', 'verify', 'restore-prepare']) {
       const command = await ace.exec('db:backup', [
-        action,
+        operation,
         '--directory',
         directory,
-        ...(action === 'restore-prepare' ? ['--target', join(root, 'recovered.db')] : []),
+        ...(operation === 'restore-prepare' ? ['--target', join(root, 'recovered.db')] : []),
       ])
       command.assertSucceeded()
       command.assertLogMatches(new RegExp(result.name))
     }
-    for (const action of ['create', 'prune']) {
-      const command = await ace.exec('db:backup', [action, '--directory', directory])
+    for (const operation of ['create', 'prune']) {
+      const command = await ace.exec('db:backup', [operation, '--directory', directory])
       command.assertFailed()
       command.assertLogMatches(/only supported for list/)
     }
@@ -591,7 +614,9 @@ test('prune reports observed removals and earlier failures when archive sync fai
   }
 }).timeout(30_000)
 
-test('command reports every native error from failed lock acquisition', async () => {
+test('command distinguishes failed lock acquisition from failed native cleanup', async ({
+  assert,
+}) => {
   const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   const prototype = Database.prototype as {
@@ -618,8 +643,19 @@ test('command reports every native error from failed lock acquisition', async ()
     ace.ui.switchMode('raw')
     const command = await ace.exec('db:backup', ['create'])
     command.assertFailed()
-    command.assertLogMatches(/backup native cleanup failed: false/)
+    command.assertLogMatches(/db:backup create failed: lock acquisition and close failed: false/)
     command.assertLogMatches(/backup native cleanup failed: 0/)
+    assert.notInclude(
+      ace.ui.logger
+        .getLogs()
+        .map(({ message }) => message)
+        .join('\n'),
+      'backup native cleanup failed: false'
+    )
+    assert.instanceOf(command.error, AggregateError)
+    const aggregate = command.error as AggregateError
+    assert.deepEqual(aggregate.errors, [false, 0])
+    assert.strictEqual(aggregate.cause, false)
   } finally {
     prototype.exec = originalExec
     prototype.close = originalClose

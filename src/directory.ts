@@ -6,13 +6,6 @@ import { resolveFilesystemPath } from './paths.ts'
 
 /**
  * Create or tighten a backup root to owner-only access. Call once at startup.
- *
- * @example
- * ```ts
- * import { prepareDirectory } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * prepareDirectory('storage/backups')
- * ```
  */
 export function prepareDirectory(path: string): void {
   const directory = resolveFilesystemPath(path)

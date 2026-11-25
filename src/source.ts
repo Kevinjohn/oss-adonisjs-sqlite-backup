@@ -1,4 +1,5 @@
 import { statSync } from 'node:fs'
+import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { isAbsolute, relative, sep } from 'node:path'
 import { E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.ts'
 import { openDatabase, type NativeDatabase } from './native.ts'
@@ -24,18 +25,6 @@ export function openOwnedSource(path: string): NativeDatabase {
 
 /**
  * Resolve the live SQLite file from Lucid's `config/database.ts`, as SQLite itself would.
- *
- * @example
- * ```ts
- * import { resolveSqliteSource } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const livePath = resolveSqliteSource({
- *   connection: 'orchard',
- *   connections: {
- *     orchard: { client: 'better-sqlite3', connection: { filename: 'storage/orchard.sqlite' } },
- *   },
- * })
- * ```
  */
 export function resolveSqliteSource(
   database: LucidDatabaseConfig | undefined,
@@ -44,21 +33,21 @@ export function resolveSqliteSource(
   const name = connectionName ?? database?.connection
   const node = name ? database?.connections?.[name] : undefined
   if (!name || !node) {
-    throw new E_BACKUP_SOURCE(`Lucid connection "${name}" is not configured`)
+    throw new InvalidArgumentsException(`Lucid connection "${name}" is not configured`)
   }
   if (!SQLITE_CLIENTS.has(node.client)) {
-    throw new E_BACKUP_SOURCE(`connection "${name}" uses ${node.client}`)
+    throw new InvalidArgumentsException(`connection "${name}" uses ${node.client}`)
   }
   const configuredFilename = (node.connection as { filename?: unknown } | undefined)?.filename
   if (typeof configuredFilename !== 'string') {
-    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
+    throw new InvalidArgumentsException(`connection "${name}" is not file-backed`)
   }
   const filename = normalizeConfiguredSqliteFilename(configuredFilename, node.client)
   if (filename === '' || filename === ':memory:') {
-    throw new E_BACKUP_SOURCE(`connection "${name}" is not file-backed`)
+    throw new InvalidArgumentsException(`connection "${name}" is not file-backed`)
   }
   if (/^file:/i.test(filename)) {
-    throw new E_BACKUP_SOURCE(`connection "${name}" uses a URI filename`)
+    throw new InvalidArgumentsException(`connection "${name}" uses a URI filename`)
   }
   return resolveFilesystemPath(filename)
 }
