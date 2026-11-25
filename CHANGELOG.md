@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Preserve command errors for callers while reporting backup and upgrade failures once.
+
 ## 0.5.0 - 2026-11-24
 
 - `db:upgrade` reports a failed migration as one `Upgrade failed: …` line, without a stack trace,

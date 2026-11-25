@@ -236,6 +236,11 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
     ace.ui.switchMode('raw')
     const unknown = await ace.exec('db:backup', ['explode'])
     unknown.assertFailed()
+    assert.equal(unknown.error?.code, 'E_BACKUP_UNSAFE')
+    assert.lengthOf(
+      ace.ui.logger.getLogs().filter((log) => log.message.includes('unknown action')),
+      1
+    )
     unknown.assertLogMatches(/E_BACKUP_UNSAFE: unknown action/)
     const noTarget = await ace.exec('db:backup', ['restore-prepare'])
     noTarget.assertFailed()
@@ -512,21 +517,28 @@ test('disabled provider boots; commands recover from an explicit directory and r
   }
 }).timeout(30_000)
 
-test('command reports the original create failure and its cleanup failure', async () => {
+test('command reports the original create failure and its cleanup failure', async ({ assert }) => {
   const { root, cleanup } = createTemporaryRoot()
   const { app, live } = await bootApp(root)
   try {
     const db = openDatabase(live)
     db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
     db.close()
+    const original = new Error('original copy failure')
     internalHooks.step = (step) => {
-      if (step === 'create:copied') throw new Error('original copy failure')
+      if (step === 'create:copied') throw original
       if (step === 'create:cleanup') throw new Error('cleanup permission failure')
     }
     const ace = await app.container.make('ace')
     ace.ui.switchMode('raw')
     const command = await ace.exec('db:backup', ['create'])
     command.assertFailed()
+    assert.strictEqual(command.error, original)
+    assert.equal(command.exitCode, 1)
+    assert.lengthOf(
+      ace.ui.logger.getLogs().filter((log) => log.message.includes('original copy failure')),
+      1
+    )
     command.assertLogMatches(/original copy failure/)
     command.assertLogMatches(/backup temp cleanup failed: Error: cleanup permission failure/)
   } finally {

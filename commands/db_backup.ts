@@ -54,62 +54,65 @@ export default class DbBackup extends BaseCommand {
   }
 
   async run() {
-    try {
-      const backup = await this.app.container.make('sqlite.backup')
-      for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
-        if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
-        if (!(actions as readonly string[]).includes(this.action)) {
-          throw new E_BACKUP_UNSAFE(
-            `--${flag} is only supported for ${formatFlagActionNames(actions)}`
-          )
-        }
+    const backup = await this.app.container.make('sqlite.backup')
+    for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
+      if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
+      if (!(actions as readonly string[]).includes(this.action)) {
+        throw new E_BACKUP_UNSAFE(
+          `--${flag} is only supported for ${formatFlagActionNames(actions)}`
+        )
       }
-      switch (this.action) {
-        case 'create': {
-          assertSafeLayout(backup.livePath(), resolveFilesystemPath(backup.config.directory))
-          backup.prepareDirectory()
-          const result = await backup.create()
-          for (const warning of result.warnings) this.logger.warning(warning)
-          this.logger.success(`Backup ${result.name} written to ${result.path}`)
-          return
-        }
-        case 'list':
-          for (const bundle of backup.list(this.directory)) this.logger.log(bundle.name)
-          return
-        case 'verify':
-          this.logger.success(`Bundle ${backup.verify(this.bundle, this.directory).name} verified`)
-          return
-        case 'restore-prepare': {
-          if (!this.target) {
-            throw new E_BACKUP_UNSAFE('restore-prepare needs --target')
-          }
-          const staged = backup.prepareRestore({
-            target: this.target,
-            name: this.bundle,
-            directory: this.directory,
-          })
-          this.logger.success(
-            `Staged ${staged.bundle} at ${staged.target}. The live database is untouched.`
-          )
-          return
-        }
-        case 'prune': {
-          if (this.keep !== undefined) {
-            const keepProblem = pruneKeepProblem(this.keep)
-            if (keepProblem) throw new E_BACKUP_UNSAFE(keepProblem)
-          }
-          const result = await backup.prune({ keep: this.keep })
-          this.reportPruneFailures(result.failed)
-          this.logger.success(
-            `Pruned ${result.removed.length} bundle(s), ${result.abandoned.length} unfinished`
-          )
-          if (result.failed.length > 0) this.exitCode = 1
-          return
-        }
-        default:
-          throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${ACTIONS.join(', ')})`)
+    }
+    switch (this.action) {
+      case 'create': {
+        assertSafeLayout(backup.livePath(), resolveFilesystemPath(backup.config.directory))
+        backup.prepareDirectory()
+        const result = await backup.create()
+        for (const warning of result.warnings) this.logger.warning(warning)
+        this.logger.success(`Backup ${result.name} written to ${result.path}`)
+        return
       }
-    } catch (error) {
+      case 'list':
+        for (const bundle of backup.list(this.directory)) this.logger.log(bundle.name)
+        return
+      case 'verify':
+        this.logger.success(`Bundle ${backup.verify(this.bundle, this.directory).name} verified`)
+        return
+      case 'restore-prepare': {
+        if (!this.target) {
+          throw new E_BACKUP_UNSAFE('restore-prepare needs --target')
+        }
+        const staged = backup.prepareRestore({
+          target: this.target,
+          name: this.bundle,
+          directory: this.directory,
+        })
+        this.logger.success(
+          `Staged ${staged.bundle} at ${staged.target}. The live database is untouched.`
+        )
+        return
+      }
+      case 'prune': {
+        if (this.keep !== undefined) {
+          const keepProblem = pruneKeepProblem(this.keep)
+          if (keepProblem) throw new E_BACKUP_UNSAFE(keepProblem)
+        }
+        const result = await backup.prune({ keep: this.keep })
+        this.reportPruneFailures(result.failed)
+        this.logger.success(
+          `Pruned ${result.removed.length} bundle(s), ${result.abandoned.length} unfinished`
+        )
+        if (result.failed.length > 0) this.exitCode = 1
+        return
+      }
+      default:
+        throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${ACTIONS.join(', ')})`)
+    }
+  }
+
+  async completed() {
+    const error = this.error
+    if (error) {
       const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
       const code = backupCode ? `${backupCode}: ` : ''
       const message = error instanceof Error ? error.message : String(error)
@@ -145,7 +148,8 @@ export default class DbBackup extends BaseCommand {
         for (const nestedError of nestedErrors ?? [])
           this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
       }
-      this.exitCode = 1
+      return true
     }
+    return false
   }
 }
