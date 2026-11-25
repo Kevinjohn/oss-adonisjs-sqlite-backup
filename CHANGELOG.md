@@ -2,18 +2,75 @@
 
 ## Unreleased
 
-- Ace configure now registers the Lucid command loader used for schema generation after
-  `db:upgrade`.
-- Preserve command errors for callers while reporting backup and upgrade failures once.
+### Upgrade programmatic callers
 
-- Breaking: replace standalone backup and operator functions with `BackupArchive` and
-  `OperatorDatabase`. See the [caller mapping](DECISIONS.md#updating-callers).
-- Breaking: `SqliteBackup` keeps its Lucid database configuration private. Ace names the first
-  `db:backup` argument `operation` in command metadata and help. Existing positional invocations
-  use the same operation values.
-- Breaking: missing, unsupported or non-file Lucid source settings throw AdonisJS’s
-  `InvalidArgumentsException`. A write that makes no progress throws `E_BACKUP_WRITE`.
-- Ace reports a lock-acquisition failure separately from a native cleanup failure.
+The standalone API now uses two classes exported from `@kevinjohn/adonisjs-sqlite-backup`.
+Existing format-1 bundles remain readable without a data migration. The functions in the
+left column have been removed from the package root without compatibility aliases.
+
+Create one `new BackupArchive(directory)` for each archive you use. Pass the directory to the
+constructor and omit it from method options.
+
+| Removed export and previous call                 | Replacement                                                                                                                                                                                                                    |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `prepareDirectory(directory)`                    | `archive.prepareDirectory()`                                                                                                                                                                                                   |
+| `createBundle({ directory, ...options })`        | `await archive.create(options)`. Pass `livePath` or `source: { database }` for a borrowed native handle.                                                                                                                       |
+| `listBundles(directory)`                         | `archive.list()`                                                                                                                                                                                                               |
+| `verifyBundle(directory, name)`                  | `archive.verify(name)`. Omit `name` to verify the newest bundle.                                                                                                                                                               |
+| `prepareRestore({ directory, ...options })`      | `archive.prepareRestore({ livePath, target, name })`. Pass the live path and an unused target path. `name` is optional.                                                                                                        |
+| `pruneBundles({ directory, ...options })`        | `archive.prune(options)`. Pass `keep` and optionally `lockTimeoutMs`.                                                                                                                                                          |
+| `acquireLock(directory, timeoutMs)`              | `archive.acquireLock(timeoutMs)`. Keep the returned lock and call `release()` in a `finally` block.                                                                                                                            |
+| `operatorDatabasePath(db, confirmation)`         | `operator.databasePath(confirmation)` on `new OperatorDatabase(db)`. Call it before opening any connection.                                                                                                                    |
+| `withOperatorDatabase(db, callback)`             | `await operator.run(callback)`. The callback receives the pinned native handle. Leave it open for the operator's cleanup.                                                                                                      |
+| `resolveSqliteSource(database, connection)`      | `new SqliteBackup(defineConfig({ directory, connection }), database).livePath()`, or use `livePath()` on the configured service. The service requires an enabled backup directory.                                             |
+| `preMigrationBackupDirectory(dbPath, directory)` | Inspect `pre-migration` under the resolved backup directory, or the resolved database path with `.backups` appended when no backup directory is set. See [where db:upgrade writes its backup](README.md#upgrading-a-database). |
+| `syncPath(path)`                                 | Use Node's `node:fs` APIs for caller-owned files or directories, for example `openSync`, `fsyncSync` and `closeSync`. The package handles syncing its own writes.                                                              |
+
+`CreateBundleOptions` is available for typed wrappers around `archive.create()`.
+`DirectoryLock` and `NativeDatabase` remain available as type exports.
+
+`SqliteBackup` now holds the Lucid database configuration in a private field. Subclasses that
+read the former `database` property should use `livePath()` to resolve the source or keep their
+own reference to the supplied configuration. See the [caller migration guide](DECISIONS.md#updating-callers).
+
+### Update error handling and Ace setup
+
+- Match AdonisJS's `InvalidArgumentsException` for an unconfigured connection, unsupported
+  client, or missing, non-string, empty, in-memory or URI filename. This replaces
+  `E_BACKUP_SOURCE` for these configuration mistakes. Keep matching `errors.E_BACKUP_SOURCE`
+  for operational source failures such as an unavailable database file.
+- Match `errors.E_BACKUP_WRITE` by class or `E_BACKUP_WRITE` by code when a bundle file write
+  makes no progress. Update tests and error handlers that expected `E_BACKUP_INVALID` for this case.
+  Continue using `E_BACKUP_INVALID` for bundle verification failures.
+- The first `db:backup` argument is now called `operation` in the command property, Ace metadata
+  and help. Update code that sets or inspects `action`. Positional invocations still use
+  `create`, `list`, `verify`, `restore-prepare` and `prune`.
+- On adoption, rerun `node ace configure @kevinjohn/adonisjs-sqlite-backup` to register
+  `@adonisjs/lucid/commands` in `adonisrc.ts` for schema generation after `db:upgrade`.
+  Rerunning preserves existing backup configuration and avoids duplicate registrations.
+- Ace reports an archive lock-acquisition failure before a separate native close failure,
+  keeping the underlying failures available to callers. An acquisition `Error` retains its
+  identity, with the close failure in `resourceCleanupErrors`. When acquisition throws a
+  non-`Error` value and close also fails, the `AggregateError` lists both original values
+  in that order.
+- If native teardown fails after bundle creation, the package attempts to remove the failed
+  bundle and retains any removal failure alongside the original error. A single teardown failure
+  retains its identity, including an existing `AggregateError`. Both Ace commands keep their
+  failure in `error` for calling commands and avoid duplicate primary failure output.
+
+### Capacity Lens adoption
+
+Capacity Lens pins the published 0.5.0 tarball. Apply these changes when adopting a release
+that includes the new API.
+
+- Use `new BackupArchive(directory).list()` in backend diagnostics. In installation reset, create
+  the verified backup with `archive.create({ source: { database: connection } })` inside the
+  operator callback. Sync the retained source files, archive directory and source parent directory
+  with Node's filesystem API.
+- Move owner recovery, company initialization and installation reset to
+  `OperatorDatabase.databasePath(confirmation)` and `OperatorDatabase.run(callback)`.
+- Update the backend backup configuration, provider, restore, installation reset and upgrade
+  tests that use the removed imports.
 
 ## 0.5.0 - 2026-11-24
 
