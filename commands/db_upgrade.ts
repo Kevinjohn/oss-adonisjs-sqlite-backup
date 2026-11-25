@@ -26,77 +26,74 @@ export default class DbUpgrade extends BaseCommand {
   })
   declare schemaGenerate: boolean
 
+  private childReportedFailure = false
+
   async run() {
-    try {
-      const db = await this.app.container.make('lucid.db')
-      const connectionConfig = db.getRawConnection(db.primaryConnectionName)?.config
-      if (connectionConfig?.client !== 'better-sqlite3') {
-        throw new InvalidArgumentsException('db:upgrade requires the configured SQLite connection')
+    const db = await this.app.container.make('lucid.db')
+    const connectionConfig = db.getRawConnection(db.primaryConnectionName)?.config
+    if (connectionConfig?.client !== 'better-sqlite3') {
+      throw new InvalidArgumentsException('db:upgrade requires the configured SQLite connection')
+    }
+    const dbPath = normalizeConfiguredSqliteFilename(
+      (connectionConfig.connection as { filename: string }).filename,
+      connectionConfig.client
+    )
+    const existing = await db.from('sqlite_master').where({ type: 'table' }).select('name').first()
+    // An empty or in-memory database has nothing to roll back to.
+    if (dbPath !== ':memory:' && existing) {
+      if (!dbPath || /^file:/i.test(dbPath)) {
+        throw new InvalidArgumentsException('db:upgrade requires a file-backed SQLite connection')
       }
-      const dbPath = normalizeConfiguredSqliteFilename(
-        (connectionConfig.connection as { filename: string }).filename,
-        connectionConfig.client
-      )
-      const existing = await db
-        .from('sqlite_master')
-        .where({ type: 'table' })
-        .select('name')
-        .first()
-      // An empty or in-memory database has nothing to roll back to.
-      if (dbPath !== ':memory:' && existing) {
-        if (!dbPath || /^file:/i.test(dbPath)) {
-          throw new InvalidArgumentsException('db:upgrade requires a file-backed SQLite connection')
-        }
-        const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
-        const directory = preMigrationBackupDirectory(dbPath, config?.directory)
-        assertSafeLayout(resolveFilesystemPath(dbPath), resolveFilesystemPath(directory))
-        prepareDirectory(directory)
-        // The same journal table, lock timeout and WAL requirement as db:backup, read from the
-        // connection being migrated.
-        const bundle = await createBundle({
-          livePath: dbPath,
-          directory,
-          migrationsTable: connectionConfig.migrations?.tableName,
-          lockTimeoutMs: config?.lockTimeoutMs,
-          requireWal: config?.requireWal,
-        })
-        for (const warning of bundle.warnings) this.logger.warning(warning)
-        this.logger.success(`Pre-upgrade backup written ${bundle.path}`)
-      }
-      // Lucid's migration runner, not `migration:run`: a nested command renders its own failure
-      // with the stack, and only that command's `completed()` could stop it.
-      const migrator = new MigrationRunner(db, this.app, { direction: 'up' })
-      migrator.on('migration:completed', (file) => this.logger.log(`❯ migrated ${file.file.name}`))
-      migrator.on('migration:error', (file) => this.logger.log(`❯ error ${file.file.name}`))
-      await migrator.run()
-      if (migrator.error) {
-        this.error = migrator.error
-        this.exitCode = 1
-        return
-      }
-      if (migrator.status === 'skipped') this.logger.log('Already up to date')
-      // Generated only after every migration succeeds.
-      if (this.schemaGenerate && !this.app.inProduction) {
-        const generate = await this.kernel.exec('schema:generate', [
-          `--connection=${db.primaryConnectionName}`,
-        ])
-        if (generate.exitCode !== 0) {
-          this.error = generate.error
-          this.exitCode = generate.exitCode ?? 1
-        }
-      }
-    } catch (error) {
-      const detail =
-        error instanceof InvalidArgumentsException ? `Error: ${error.message}` : String(error)
-      this.logger.error(`Upgrade failed: ${detail}`)
+      const config = this.app.config.get<BackupConfig | undefined>('backup', undefined)
+      const directory = preMigrationBackupDirectory(dbPath, config?.directory)
+      assertSafeLayout(resolveFilesystemPath(dbPath), resolveFilesystemPath(directory))
+      prepareDirectory(directory)
+      // The same journal table, lock timeout and WAL requirement as db:backup, read from the
+      // connection being migrated.
+      const bundle = await createBundle({
+        livePath: dbPath,
+        directory,
+        migrationsTable: connectionConfig.migrations?.tableName,
+        lockTimeoutMs: config?.lockTimeoutMs,
+        requireWal: config?.requireWal,
+      })
+      for (const warning of bundle.warnings) this.logger.warning(warning)
+      this.logger.success(`Pre-upgrade backup written ${bundle.path}`)
+    }
+    // Lucid's migration runner, not `migration:run`: a nested command renders its own failure
+    // with the stack, and only that command's `completed()` could stop it.
+    const migrator = new MigrationRunner(db, this.app, { direction: 'up' })
+    migrator.on('migration:completed', (file) => this.logger.log(`❯ migrated ${file.file.name}`))
+    migrator.on('migration:error', (file) => this.logger.log(`❯ error ${file.file.name}`))
+    await migrator.run()
+    if (migrator.error) {
+      this.error = migrator.error
       this.exitCode = 1
+      return
+    }
+    if (migrator.status === 'skipped') this.logger.log('Already up to date')
+    // Generated only after every migration succeeds.
+    if (this.schemaGenerate && !this.app.inProduction) {
+      const generate = await this.kernel.exec('schema:generate', [
+        `--connection=${db.primaryConnectionName}`,
+      ])
+      if (generate.exitCode !== 0) {
+        this.error = generate.error
+        this.exitCode = generate.exitCode ?? 1
+        this.childReportedFailure = true
+      }
     }
   }
 
   /** Reports a failure kept in `error` as one line, so Ace does not render it with the stack. */
   async completed() {
     if (!this.error) return false
-    this.logger.error(`Upgrade failed: ${String(this.error)}`)
+    if (this.childReportedFailure) return true
+    const detail =
+      this.error instanceof InvalidArgumentsException
+        ? `Error: ${this.error.message}`
+        : String(this.error)
+    this.logger.error(`Upgrade failed: ${detail}`)
     return true
   }
 }

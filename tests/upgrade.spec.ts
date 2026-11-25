@@ -16,6 +16,7 @@ import {
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { BaseCommand } from '@adonisjs/core/ace'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { defineConfig as defineDatabaseConfig } from '@adonisjs/lucid'
@@ -94,6 +95,15 @@ async function bootApp(
       .map((log) => log.message)
       .join('\n')
   return { app, live, upgrade, logs }
+}
+
+// Mirrors the application wrapper: the child has already reported an unsuccessful upgrade.
+class AppUpgrade extends BaseCommand {
+  static commandName = 'app:upgrade'
+  async run() {
+    const upgrade = await this.kernel.exec('db:upgrade', ['--no-schema-generate'])
+    if (upgrade.exitCode !== 0) this.exitCode = upgrade.exitCode ?? 1
+  }
 }
 
 function tables(path: string): string[] {
@@ -317,7 +327,8 @@ test.group('db:upgrade', (group) => {
     app = booted.app
     const command = await booted.upgrade()
     assert.equal(command.exitCode, 1)
-    assert.include(booted.logs(), 'Upgrade failed: ')
+    assert.instanceOf(command.error, Error)
+    assert.lengthOf(booted.logs().split('Upgrade failed: '), 2)
     assert.notInclude(tables(booted.live), 'heroes')
   })
 
@@ -511,10 +522,77 @@ test.group('db:upgrade', (group) => {
     mkdirSync(join(root, 'database', 'schema.ts'))
     const booted = await bootApp(root)
     app = booted.app
+    const ace = await app.container.make('ace')
+    const rendered: unknown[] = []
+    const render = ace.errorHandler.render.bind(ace.errorHandler)
+    ace.errorHandler.render = async (error, kernel) => {
+      rendered.push(error)
+      await render(error, kernel)
+    }
     const command = await booted.upgrade([])
     assert.isAbove(command.exitCode ?? 0, 0)
     assert.instanceOf(command.error, Error)
+    assert.deepEqual(rendered, [command.error])
+    const errors = ace.ui.logger.getLogs().filter((log) => log.stream === 'stderr')
+    assert.lengthOf(errors, 1)
+    assert.notInclude(booted.logs(), 'Upgrade failed:')
     assert.include(tables(booted.live), 'heroes')
+  })
+
+  test('a wrapper reports backup and migration failures once', async ({ assert }) => {
+    const seed = openDatabase(join(root, 'live.db'))
+    seed.exec('CREATE TABLE villains (id INTEGER PRIMARY KEY)')
+    seed.close()
+    writeMigration(root, '001_broken', "await this.db.rawQuery('SELECT * FROM no_such_table')")
+    writeFileSync(join(root, 'occupied'), 'not a directory')
+    const booted = await bootApp(root, { backups: join(root, 'occupied') })
+    app = booted.app
+    const ace = await app.container.make('ace')
+    const first = await ace.create(AppUpgrade, [])
+    await first.exec()
+    assert.equal(first.exitCode, 1)
+    assert.lengthOf(
+      ace.ui.logger.getLogs().filter((log) => log.message.includes('Upgrade failed:')),
+      1
+    )
+    assert.notInclude(tables(booted.live), 'adonis_schema')
+    // Repair the destination and run the same wrapper against the failing migration.
+    app.config.set('backup', defineConfig({ directory: join(root, 'backups') }))
+    const second = await ace.create(AppUpgrade, [])
+    await second.exec()
+    assert.equal(second.exitCode, 1)
+    const logs = ace.ui.logger.getLogs().map((log) => log.message)
+    assert.lengthOf(
+      logs.filter((message) => message.includes('Upgrade failed:')),
+      2
+    )
+    assert.lengthOf(
+      logs.filter((message) => message.includes('no such table: no_such_table')),
+      1
+    )
+    assert.isTrue(logs.some((message) => message.includes('Pre-upgrade backup written')))
+  })
+
+  test('preserves a schema child exit code without an error object', async ({ assert }) => {
+    const booted = await bootApp(root)
+    app = booted.app
+    const ace = await app.container.make('ace')
+    const exec = ace.exec.bind(ace)
+    ace.exec = (async (name, argv, options) => {
+      if (name === 'schema:generate') {
+        ace.ui.logger.error('schema child failed')
+        return { exitCode: 7, error: undefined }
+      }
+      return exec(name, argv, options)
+    }) as typeof ace.exec
+    const command = await booted.upgrade([])
+    assert.equal(command.exitCode, 7)
+    assert.isUndefined(command.error)
+    assert.lengthOf(
+      ace.ui.logger.getLogs().filter((log) => log.message.includes('schema child failed')),
+      1
+    )
+    assert.notInclude(booted.logs(), 'Upgrade failed:')
   })
 
   test('does not generate schema classes in production', async ({ assert }) => {
