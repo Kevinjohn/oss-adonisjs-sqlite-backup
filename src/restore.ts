@@ -1,13 +1,13 @@
 import { chmodSync, constants, copyFileSync, lstatSync, rmSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { assertMatchesManifest, readManifest, requireSelectedBundle } from './bundles.js'
-import { assertDirectory } from './directory.js'
-import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.js'
-import { syncPath } from './fs.js'
-import { internalHooks } from './internal_hooks.js'
-import { DATABASE, READY } from './names.js'
-import { resolveFilesystemPath } from './paths.js'
-import { isWithin, normalizeConfiguredSqliteFilename } from './source.js'
+import { assertMatchesManifest, readManifest, requireSelectedBundle } from './bundles.ts'
+import { assertDirectory } from './directory.ts'
+import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.ts'
+import { syncPath } from './fs.ts'
+import { internalHooks } from './internal_hooks.ts'
+import { DATABASE, READY } from './names.ts'
+import { resolveFilesystemPath } from './paths.ts'
+import { isWithin, normalizeConfiguredSqliteFilename } from './source.ts'
 
 /** Exists in any form, including a dangling symlink (unlike existsSync). */
 const existsIncludingDanglingSymlink = (path: string) =>

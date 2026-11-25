@@ -1,4 +1,4 @@
-import { openDatabase, type NativeDatabase } from './native.js'
+import { openDatabase, type NativeDatabase } from './native.ts'
 
 /** Full `integrity_check` and `foreign_key_check`. Returns the first problem, or null when clean. */
 export function readDatabaseIntegrityProblem(path: string): string | null {

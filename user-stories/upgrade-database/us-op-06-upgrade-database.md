@@ -3,7 +3,7 @@
 As a host operator, I want the `db:upgrade` Ace command to create a verified pre-migration backup bundle of the SQLite database before running pending migrations so that a failed or unwanted migration has a recovery point.
 
 **Status:** Operator; current Ace command.
-**Access:** Host operator with access to the Lucid `better-sqlite3` primary connection and the `@adonisjs/lucid/commands` loader. For a file-backed database with tables, the operator also needs a writable pre-migration backup location.
+**Access:** Host operator with access to the Lucid `better-sqlite3` primary connection. Schema generation uses the `@adonisjs/lucid/commands` loader registered by the [configure hook](../setup/us-setup-01-configure-backups.md). For a file-backed database with tables, the operator also needs a writable pre-migration backup location.
 **Entry:** `node ace db:upgrade [--no-schema-generate]`; run as an operator task, not in a web request.
 **Documentation:** [Upgrading a database](../../README.md#upgrading-a-database).
 **Release note:** Since v0.3.0, the pre-migration backup bundle uses the primary connection's migrations table and the backup configuration's `lockTimeoutMs` and `requireWal`, and reports non-WAL warnings.

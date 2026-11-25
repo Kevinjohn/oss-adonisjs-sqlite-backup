@@ -73,6 +73,6 @@ export interface PruneProgress extends PruneResult {
   archiveSyncFailed: boolean
 }
 
-export type { BackupErrorCode } from './errors.js'
-export type { DirectoryLock } from './lock.js'
-export type { NativeDatabase } from './native.js'
+export type { BackupErrorCode } from './errors.ts'
+export type { DirectoryLock } from './lock.ts'
+export type { NativeDatabase } from './native.ts'

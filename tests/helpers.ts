@@ -1,4 +1,5 @@
-import { prepareDirectory } from '../src/directory.js'
+import { BACKUP_ERROR_CODES, errors } from '../index.ts'
+import { prepareDirectory } from '../src/directory.ts'
 import { fork, type ChildProcess } from 'node:child_process'
 import fs, {
   fstatSync,
@@ -12,7 +13,7 @@ import fs, {
 import { syncBuiltinESMExports } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { openDatabase } from '../src/native.js'
+import { openDatabase } from '../src/native.ts'
 
 /** A fresh temporary directory removed by the returned cleanup. */
 export function createTemporaryRoot(): { root: string; cleanup: () => void } {
@@ -164,3 +165,20 @@ export function failDirectorySync(directory: string, error: Error): () => void {
     syncBuiltinESMExports()
   }
 }
+
+/** The error code thrown by `fn`, 'raw:<code>' for a non-package error, or 'no error'. */
+export async function readBackupErrorCode(fn: () => unknown) {
+  try {
+    await fn()
+  } catch (error) {
+    const code = (error as { code?: string }).code
+    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
+    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
+  }
+  return 'no error'
+}
+
+export const sqliteConfig = (filename: string) => ({
+  connection: 'main',
+  connections: { main: { client: 'better-sqlite3', connection: { filename } } },
+})

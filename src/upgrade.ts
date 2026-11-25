@@ -1,5 +1,5 @@
 import { join } from 'node:path'
-import { resolveFilesystemPath } from './paths.js'
+import { resolveFilesystemPath } from './paths.ts'
 
 /**
  * Where the pre-migration backup bundle is written: `pre-migration` under the configured backup

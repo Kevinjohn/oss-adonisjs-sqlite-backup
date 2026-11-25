@@ -26,10 +26,14 @@ for (const entry of ['.', './types', './commands', './sqlite_backup_provider', '
 assert.equal(typeof backupPackage.configure, 'function')
 assert.equal(typeof backupPackage.defineConfig, 'function')
 assert.equal(typeof backupCommands.getCommand, 'function')
-assert.deepEqual(
-  (await backupCommands.getMetaData()).map((command) => command.commandName).sort(),
-  ['db:backup', 'db:upgrade']
-)
+const commandMetadata = await backupCommands.getMetaData()
+assert.deepEqual(commandMetadata.map((command) => command.commandName).sort(), [
+  'db:backup',
+  'db:upgrade',
+])
+const backupMetadata = commandMetadata.find(({ commandName }) => commandName === 'db:backup')
+assert.equal(backupMetadata.args[0].name, 'action')
+assert.equal((await backupCommands.getCommand(backupMetadata)).commandName, 'db:backup')
 assert.equal(typeof BackupProvider, 'function')
 assert(backupTypes)
 
@@ -49,6 +53,7 @@ await configureIgnitor.ace().handle(['configure', '@kevinjohn/adonisjs-sqlite-ba
 const rc = await readFile(join(root, 'adonisrc.ts'), 'utf8')
 assert(rc.includes('@kevinjohn/adonisjs-sqlite-backup/sqlite_backup_provider'))
 assert(rc.includes('@kevinjohn/adonisjs-sqlite-backup/commands'))
+assert.equal(rc.match(/@adonisjs\/lucid\/commands/g)?.length, 1)
 const config = await readFile(join(root, 'config/backup.ts'), 'utf8')
 assert(config.includes("from '@kevinjohn/adonisjs-sqlite-backup'"))
 const editedConfig = config.replace('keep: 7', 'keep: 12')
@@ -138,6 +143,25 @@ try {
     { body: 'packed consumer' },
     { body: 'live only' },
   ])
+  const migrationDirectory = join(root, 'database', 'migrations')
+  await mkdir(migrationDirectory, { recursive: true })
+  await writeFile(
+    join(migrationDirectory, '001_create_upgrade_check.js'),
+    `import { BaseSchema } from '@adonisjs/lucid/schema'
+    export default class extends BaseSchema {
+      async up() {
+        this.schema.createTable('upgrade_check', (table) => table.increments('id'))
+      }
+    }`
+  )
+  const upgrade = await ace.exec('db:upgrade', [])
+  upgrade.assertSucceeded()
+  assert.deepEqual(await db.from('upgrade_check').select('id'), [])
+  const schema = await readFile(join(root, 'database', 'schema.ts'), 'utf8')
+  assert.match(schema, /class UpgradeCheckSchema/)
+  assert.equal(service.list().length, 1)
+  const upgradeArchive = backupPackage.preMigrationBackupDirectory(live, service.config.directory)
+  assert.equal(backupPackage.listBundles(upgradeArchive).length, 1)
 } finally {
   await app.terminate()
 }

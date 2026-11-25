@@ -1,8 +1,8 @@
 import { chmodSync, lstatSync, mkdirSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.js'
-import { syncPath } from './fs.js'
-import { resolveFilesystemPath } from './paths.js'
+import { E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.ts'
+import { syncPath } from './fs.ts'
+import { resolveFilesystemPath } from './paths.ts'
 
 /**
  * Create or tighten a backup root to owner-only access. Call once at startup.

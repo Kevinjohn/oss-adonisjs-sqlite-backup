@@ -1,26 +1,26 @@
 import { BaseCommand, args, flags } from '@adonisjs/core/ace'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
-import * as errors from '../src/errors.js'
-import { BACKUP_ERROR_CODES, E_BACKUP_UNSAFE } from '../src/errors.js'
-import { pruneKeepProblem } from '../src/prune.js'
-import { resolveFilesystemPath } from '../src/paths.js'
-import { assertSafeLayout } from '../src/source.js'
-import type { PruneProgress, PruneResult } from '../src/types.js'
+import * as errors from '../src/errors.ts'
+import { BACKUP_ERROR_CODES, E_BACKUP_UNSAFE } from '../src/errors.ts'
+import { pruneKeepProblem } from '../src/prune.ts'
+import { resolveFilesystemPath } from '../src/paths.ts'
+import { assertSafeLayout } from '../src/source.ts'
+import type { PruneProgress, PruneResult } from '../src/types.ts'
 
-const ACTIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
+const OPERATIONS = ['create', 'list', 'verify', 'restore-prepare', 'prune'] as const
 
 /**
  * The operations each flag applies to; a flag given with any other operation is refused, not
  * ignored.
  */
-const FLAG_ACTIONS = {
+const FLAG_OPERATIONS = {
   bundle: ['verify', 'restore-prepare'],
   target: ['restore-prepare'],
   keep: ['prune'],
   directory: ['list', 'verify', 'restore-prepare'],
-} as const satisfies Record<string, readonly (typeof ACTIONS)[number][]>
+} as const satisfies Record<string, readonly (typeof OPERATIONS)[number][]>
 
-const formatFlagActionNames = (items: readonly string[]) =>
+const formatFlagOperationNames = (items: readonly string[]) =>
   items.length > 1 ? `${items.slice(0, -1).join(', ')} and ${items.at(-1)}` : items.join('')
 
 /** `node ace db:backup <create|list|verify|restore-prepare|prune>` */
@@ -30,7 +30,7 @@ export default class DbBackup extends BaseCommand {
     'Create, list, verify, stage (restore-prepare) or prune SQLite backup bundles'
   static options: CommandOptions = { startApp: true }
 
-  @args.string({ description: ACTIONS.join(' | ') })
+  @args.string({ description: OPERATIONS.join(' | ') })
   declare action: string
 
   @flags.string({ description: 'Bundle name for verify / restore-prepare (default: newest READY)' })
@@ -47,19 +47,22 @@ export default class DbBackup extends BaseCommand {
   })
   declare directory?: string
 
-  private reportPruneFailures(failures: PruneResult['failed']) {
+  #reportPruneFailures(failures: PruneResult['failed']) {
     for (const failure of failures) {
       this.logger.warning(`could not remove ${failure.name}: ${failure.reason}`)
     }
   }
 
+  /**
+   * @throws AggregateError when a backup operation and cleanup fail, or when multiple cleanup steps fail.
+   */
   async run() {
     const backup = await this.app.container.make('sqlite.backup')
-    for (const [flag, actions] of Object.entries(FLAG_ACTIONS)) {
-      if (this[flag as keyof typeof FLAG_ACTIONS] === undefined) continue
-      if (!(actions as readonly string[]).includes(this.action)) {
+    for (const [flag, operations] of Object.entries(FLAG_OPERATIONS)) {
+      if (this[flag as keyof typeof FLAG_OPERATIONS] === undefined) continue
+      if (!(operations as readonly string[]).includes(this.action)) {
         throw new E_BACKUP_UNSAFE(
-          `--${flag} is only supported for ${formatFlagActionNames(actions)}`
+          `--${flag} is only supported for ${formatFlagOperationNames(operations)}`
         )
       }
     }
@@ -98,7 +101,7 @@ export default class DbBackup extends BaseCommand {
           if (keepProblem) throw new E_BACKUP_UNSAFE(keepProblem)
         }
         const result = await backup.prune({ keep: this.keep })
-        this.reportPruneFailures(result.failed)
+        this.#reportPruneFailures(result.failed)
         this.logger.success(
           `Pruned ${result.removed.length} bundle(s), ${result.abandoned.length} unfinished`
         )
@@ -106,50 +109,45 @@ export default class DbBackup extends BaseCommand {
         return
       }
       default:
-        throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${ACTIONS.join(', ')})`)
+        throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${OPERATIONS.join(', ')})`)
     }
   }
 
   async completed() {
     const error = this.error
-    if (error) {
-      const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
-      const code = backupCode ? `${backupCode}: ` : ''
-      const message = error instanceof Error ? error.message : String(error)
-      this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
-      const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)
-        ?.pruneProgress
-      if (progress) {
-        this.reportPruneFailures(progress.failed)
-        for (const name of progress.removed) this.logger.warning(`Observed removed bundle: ${name}`)
-        for (const name of progress.abandoned)
-          this.logger.warning(`Observed removed unfinished bundle: ${name}`)
-        if (progress.archiveSyncFailed) {
-          this.logger.warning('Archive sync failed. Removal durability is unconfirmed.')
-        }
+    if (!error) return false
+    const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
+    const code = backupCode ? `${backupCode}: ` : ''
+    const message = error instanceof Error ? error.message : String(error)
+    this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+    const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)?.pruneProgress
+    if (progress) {
+      this.#reportPruneFailures(progress.failed)
+      for (const name of progress.removed) this.logger.warning(`Observed removed bundle: ${name}`)
+      for (const name of progress.abandoned)
+        this.logger.warning(`Observed removed unfinished bundle: ${name}`)
+      if (progress.archiveSyncFailed) {
+        this.logger.warning('Archive sync failed. Removal durability is unconfirmed.')
       }
-      if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
-        this.logger.error(
-          `backup temp cleanup failed: ${String((error as { cleanupError?: unknown }).cleanupError)}`
-        )
-      const resourceErrors =
-        (error !== null && typeof error === 'object'
-          ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
-          : undefined) ??
-        (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError')
-          ? error.errors
-          : [])
-      for (const resourceError of resourceErrors) {
-        this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
-        const nestedErrors =
-          resourceError !== null && typeof resourceError === 'object'
-            ? (resourceError as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
-            : undefined
-        for (const nestedError of nestedErrors ?? [])
-          this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
-      }
-      return true
     }
-    return false
+    if (error !== null && typeof error === 'object' && Object.hasOwn(error, 'cleanupError'))
+      this.logger.error(
+        `backup temp cleanup failed: ${String((error as { cleanupError?: unknown }).cleanupError)}`
+      )
+    const resourceErrors =
+      (error !== null && typeof error === 'object'
+        ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+        : undefined) ??
+      (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError') ? error.errors : [])
+    for (const resourceError of resourceErrors) {
+      this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
+      const nestedErrors =
+        resourceError !== null && typeof resourceError === 'object'
+          ? (resourceError as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
+          : undefined
+      for (const nestedError of nestedErrors ?? [])
+        this.logger.error(`backup native cleanup failed: ${String(nestedError)}`)
+    }
+    return true
   }
 }

@@ -1,6 +1,6 @@
-import { E_BACKUP_INVALID } from './errors.js'
-import { openDatabase, type NativeDatabase } from './native.js'
-import type { BundleManifest } from './types.js'
+import { E_BACKUP_INVALID } from './errors.ts'
+import { openDatabase, type NativeDatabase } from './native.ts'
+import type { BundleManifest } from './types.ts'
 
 function hasMigrationTable(database: NativeDatabase, table: string): boolean {
   return !!database

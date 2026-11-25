@@ -1,6 +1,6 @@
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
-import type { BackupConfig, BackupConfigInput } from './types.js'
-import { assertLockTimeout } from './lock.js'
+import type { BackupConfig, BackupConfigInput } from './types.ts'
+import { assertLockTimeout } from './lock.ts'
 
 /**
  * Validate `config/backup.ts` and apply defaults.

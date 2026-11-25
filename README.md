@@ -7,8 +7,7 @@ stages a checked copy without touching the live file.
 
 ## Install
 
-Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13. Each release lists its
-archive's SHA-256.
+Each release lists its archive's SHA-256.
 
 ```sh
 pnpm add https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/releases/download/v0.5.0/kevinjohn-adonisjs-sqlite-backup-0.5.0.tgz
@@ -17,39 +16,11 @@ node ace configure @kevinjohn/adonisjs-sqlite-backup
 
 The Ace `configure` command requires `@adonisjs/assembler` in the host application for its
 codemods. It writes `config/backup.ts` and adds the provider and the package's Ace command loader
-(`db:backup` and `db:upgrade`) to `adonisrc.ts`. The loader uses Ace's `ListLoader` directly for
-command discovery and metadata. A plain rerun preserves an existing config and does not duplicate
-registrations. Also register `@adonisjs/lucid/commands` to use `db:upgrade`.
+(`db:backup` and `db:upgrade`) to `adonisrc.ts`. A plain rerun preserves an existing config and avoids
+duplicate registrations. Current source builds also register `@adonisjs/lucid/commands` for schema
+generation after `db:upgrade`. When using the v0.5.0 archive above, register the Lucid loader in
+`adonisrc.ts` if it is missing and you use schema generation.
 The live database path comes from the Lucid connection in `config/database.ts`.
-
-## Commands
-
-Select an operation of the `db:backup` Ace command using its positional `action` argument.
-
-| Command                                                            | What it does                                                                                     | Lock |
-| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---- |
-| `node ace db:backup create`                                        | Online copy, full `integrity_check` and `foreign_key_check`, manifest with SHA-256, then `READY` | yes  |
-| `node ace db:backup list`                                          | Names of READY bundles, oldest first                                                             | no   |
-| `node ace db:backup verify [--bundle name]`                        | Re-checks READY, size, SHA-256 and integrity of a bundle (default: newest)                       | no   |
-| `node ace db:backup restore-prepare --target path [--bundle name]` | Copies a bundle to a new path and verifies the copy. Never replaces the live database            | no   |
-| `node ace db:backup prune [--keep n]`                              | Keeps the newest `n` READY bundles (default: `keep` in config) and removes unfinished ones       | yes  |
-
-Prune counts READY markers; it does not verify each bundle's database. READY means published, not
-that the bundle remains readable or recoverable. Before pruning, verify recovery points with
-`db:backup verify` and retain a separate known-good copy until the recovery point you intend to
-keep has passed verification. A damaged READY bundle still counts toward `--keep` and can displace
-an older usable bundle from retention.
-
-A bundle is a real directory (never a symlink) named `bak-utc-YYYYMMDD-HHMMSS-mmm` with a valid
-date, holding `db.sqlite`, `manifest.json` and `READY`, all read-only. Names only increase within
-a directory, so name order is age order for prune. A clock step back of up to 24 h is absorbed;
-if the newest bundle is dated more than 24 h after the clock, create refuses until the clock or
-the bundle is fixed. `manifest.createdAt` is the real clock time.
-
-`list`, `verify` and `restore-prepare` accept `--directory <path>` to read another backup
-root. This overrides the configured directory and works even when scheduled backups are disabled.
-`create` and `prune` always use the configured directory. A flag given with an operation that does
-not read it, such as `prune --bundle`, is refused.
 
 ## Service and configuration
 
@@ -156,12 +127,41 @@ preparation check the expected size and hash against the bytes. The READY marker
 database members must be regular files for recovery. A missing `sourceJournalMode` in an imported
 format-1 manifest is tolerated for compatibility; it is not used to establish recovery integrity.
 
+## Commands
+
+Pass the operation as the first argument to the `db:backup` Ace command.
+
+| Command                                                            | What it does                                                                                     | Lock |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ | ---- |
+| `node ace db:backup create`                                        | Online copy, full `integrity_check` and `foreign_key_check`, manifest with SHA-256, then `READY` | yes  |
+| `node ace db:backup list`                                          | Names of READY bundles, oldest first                                                             | no   |
+| `node ace db:backup verify [--bundle name]`                        | Re-checks READY, size, SHA-256 and integrity of a bundle (default: newest)                       | no   |
+| `node ace db:backup restore-prepare --target path [--bundle name]` | Copies a bundle to a new path and verifies the copy. Never replaces the live database            | no   |
+| `node ace db:backup prune [--keep n]`                              | Keeps the newest `n` READY bundles (default: `keep` in config) and removes unfinished ones       | yes  |
+
+Prune counts READY markers; it does not verify each bundle's database. READY means published, not
+that the bundle remains readable or recoverable. Before pruning, verify recovery points with
+`db:backup verify` and retain a separate known-good copy until the recovery point you intend to
+keep has passed verification. A damaged READY bundle still counts toward `--keep` and can displace
+an older usable bundle from retention.
+
+A bundle is a real directory (never a symlink) named `bak-utc-YYYYMMDD-HHMMSS-mmm` with a valid
+date, holding `db.sqlite`, `manifest.json` and `READY`, all read-only. Names only increase within
+a directory, so name order is age order for prune. A clock step back of up to 24 h is absorbed;
+if the newest bundle is dated more than 24 h after the clock, create refuses until the clock or
+the bundle is fixed. `manifest.createdAt` is the real clock time.
+
+`list`, `verify` and `restore-prepare` accept `--directory <path>` to read another backup
+root. This overrides the configured directory and works even when scheduled backups are disabled.
+`create` and `prune` always use the configured directory. A flag given with an operation that does
+not read it, such as `prune --bundle`, is refused.
+
 ## Upgrading a database
 
 The `db:upgrade` Ace command (`node ace db:upgrade`) creates a verified pre-migration backup bundle
 of the primary connection's database, then runs the pending migrations with Lucid's migration
-runner, as `migration:run --force` would. Register `@adonisjs/lucid/commands` as well as this
-package's commands for schema generation.
+runner, as `migration:run --force` would. Schema generation uses the Lucid command loader
+registered during [setup](#install).
 
 - `preMigrationBackupDirectory(dbPath, configuredDirectory?)` is exported from
   `@kevinjohn/adonisjs-sqlite-backup`. It resolves the configured directory and appends
@@ -296,6 +296,10 @@ Stopped-server operator helpers report these preconditions and failures:
 - A single failure, from the lock, the work or cleanup, is thrown unchanged. When more than one
   occurs, an `AggregateError` (`Operator database cleanup failed`) lists the lock or work failure
   first, then cleanup failures in the order they were observed.
+
+## Supported versions
+
+Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13.
 
 ## Limits
 

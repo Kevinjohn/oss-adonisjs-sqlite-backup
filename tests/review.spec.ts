@@ -1,5 +1,3 @@
-import { BACKUP_ERROR_CODES, errors } from '../index.js'
-import { prepared } from './helpers.js'
 /**
  * Independent review findings (F1-F11) and rules the review found untested (M1-M16).
  * Each test names the finding or mutation it pins.
@@ -21,39 +19,27 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { defineConfig } from '../src/define_config.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { acquireLock } from '../src/lock.js'
-import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.js'
-import { hashFileSha256 } from '../src/fs.js'
-import { pruneBundles } from '../src/prune.js'
-import { prepareRestore } from '../src/restore.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { defineConfig } from '../src/define_config.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { acquireLock } from '../src/lock.ts'
+import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.ts'
+import { hashFileSha256 } from '../src/fs.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
 import {
   makeLiveDatabase,
+  prepared,
+  readBackupErrorCode,
+  sqliteConfig,
   overwrite,
   startChild,
   stopChild,
   createTemporaryRoot,
-} from './helpers.js'
+} from './helpers.ts'
 
-/** The error code thrown by `fn`, 'raw:<code>' for a non-package error, or 'no error'. */
-const readBackupErrorCode = async (fn: () => unknown) => {
-  try {
-    await fn()
-  } catch (error) {
-    const code = (error as { code?: string }).code
-    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
-    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
-  }
-  return 'no error'
-}
 const T = Date.UTC(2026, 10, 7, 12, 0, 0, 0)
-const sqliteConfig = (filename: string) => ({
-  connection: 'main',
-  connections: { main: { client: 'better-sqlite3', connection: { filename } } },
-})
 
 test.group('review findings', (group) => {
   let root: string

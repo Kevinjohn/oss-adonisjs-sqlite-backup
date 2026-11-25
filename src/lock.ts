@@ -3,11 +3,11 @@ import { closeSync, constants, ftruncateSync, fstatSync, lstatSync, openSync } f
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
-import { E_BACKUP_LOCKED, E_BACKUP_UNSAFE } from './errors.js'
-import { internalHooks } from './internal_hooks.js'
-import { resolveFilesystemPath } from './paths.js'
-import { LOCK_FILE } from './names.js'
-import { openDatabase, type NativeDatabase } from './native.js'
+import { E_BACKUP_LOCKED, E_BACKUP_UNSAFE } from './errors.ts'
+import { internalHooks } from './internal_hooks.ts'
+import { resolveFilesystemPath } from './paths.ts'
+import { LOCK_FILE } from './names.ts'
+import { openDatabase, type NativeDatabase } from './native.ts'
 
 export interface DirectoryLock {
   /**
@@ -17,6 +17,7 @@ export interface DirectoryLock {
    * ```ts
    * lock.release()
    * ```
+   * @throws AggregateError when rollback throws a non-Error value and closing the handle also fails.
    */
   release(): void
 }
@@ -33,6 +34,9 @@ export function assertLockTimeout(timeoutMs: number): void {
   }
 }
 
+/**
+ * @throws AggregateError when exclusive acquisition and closing its handle both fail.
+ */
 function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
   try {
@@ -99,6 +103,7 @@ function truncateLockFile(path: string): void {
  *   lock.release()
  * }
  * ```
+ * @throws AggregateError when exclusive acquisition and closing its handle both fail.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   assertLockTimeout(timeoutMs)
@@ -162,7 +167,11 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   }
 }
 
-/** Wait for a create lock without blocking the event loop needed by an in-process backup. */
+/**
+ * Wait for a create lock without blocking the event loop needed by an in-process backup.
+ *
+ * @throws AggregateError when lock acquisition and closing its handle both fail.
+ */
 export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
   assertLockTimeout(timeoutMs)
   const deadline = performance.now() + timeoutMs

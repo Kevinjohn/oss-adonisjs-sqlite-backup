@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { test } from '@japa/runner'
+import { FileSystem } from '@japa/file-system'
+import { createTemporaryRoot } from './helpers.ts'
 import { ListLoader } from '@adonisjs/core/ace'
 import Configure from '@adonisjs/core/commands/configure'
 import { IgnitorFactory } from '@adonisjs/core/factories'
@@ -10,15 +11,16 @@ import { IgnitorFactory } from '@adonisjs/core/factories'
 test('configure writes config/backup.ts and registers provider and commands once', async ({
   assert,
 }) => {
-  const root = await mkdtemp(join(tmpdir(), 'adonisjs-sqlite-backup-configure-'))
+  const { root } = createTemporaryRoot()
+  const fs = new FileSystem(root)
   try {
-    await writeFile(
-      join(root, 'package.json'),
+    await fs.create(
+      'package.json',
       '{"type":"module","devDependencies":{"@adonisjs/assembler":"8.6.0"}}'
     )
-    await writeFile(join(root, 'tsconfig.json'), '{}')
-    await writeFile(
-      join(root, 'adonisrc.ts'),
+    await fs.create('tsconfig.json', '{}')
+    await fs.create(
+      'adonisrc.ts',
       `import { defineConfig } from '@adonisjs/core/app'\nexport default defineConfig({ providers: [] })\n`
     )
     await symlink(
@@ -38,19 +40,20 @@ test('configure writes config/backup.ts and registers provider and commands once
       .create(pathToFileURL(`${root}/`), { importer })
 
     await ignitor.ace().handle(['configure', '@kevinjohn/adonisjs-sqlite-backup'])
-    const rc = await readFile(join(root, 'adonisrc.ts'), 'utf8')
+    const rc = await fs.contents('adonisrc.ts')
     assert.equal(rc.match(/adonisjs-sqlite-backup\/sqlite_backup_provider/g)?.length, 1)
     assert.equal(rc.match(/adonisjs-sqlite-backup\/commands/g)?.length, 1)
-    const config = await readFile(join(root, 'config/backup.ts'), 'utf8')
+    assert.equal(rc.match(/@adonisjs\/lucid\/commands/g)?.length, 1)
+    const config = await fs.contents('config/backup.ts')
     assert.include(config, "from '@kevinjohn/adonisjs-sqlite-backup'")
     assert.include(config, "directory: app.makePath('storage/backups')")
 
     const edited = config.replace('keep: 7', 'keep: 12')
-    await writeFile(join(root, 'config/backup.ts'), edited)
+    await fs.create('config/backup.ts', edited)
     await ignitor.ace().handle(['configure', '@kevinjohn/adonisjs-sqlite-backup'])
-    assert.equal(await readFile(join(root, 'adonisrc.ts'), 'utf8'), rc)
-    assert.equal(await readFile(join(root, 'config/backup.ts'), 'utf8'), edited)
+    assert.equal(await fs.contents('adonisrc.ts'), rc)
+    assert.equal(await fs.contents('config/backup.ts'), edited)
   } finally {
-    await rm(root, { recursive: true, force: true })
+    await fs.cleanup()
   }
 }).timeout(30_000)

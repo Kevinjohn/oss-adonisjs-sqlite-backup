@@ -11,14 +11,14 @@ import {
 } from 'node:fs'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { assertDirectory } from './directory.js'
-import { assertMigrations, readMigrationRows } from './migrations.js'
-import { readDatabaseIntegrityProblem } from './checks.js'
-import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
-import { resolveFilesystemPath } from './paths.js'
-import { hashFileSha256, syncPath, writeDurable } from './fs.js'
-import { internalHooks } from './internal_hooks.js'
-import { acquireCreateLock } from './lock.js'
+import { assertDirectory } from './directory.ts'
+import { assertMigrations, readMigrationRows } from './migrations.ts'
+import { readDatabaseIntegrityProblem } from './checks.ts'
+import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.ts'
+import { resolveFilesystemPath } from './paths.ts'
+import { hashFileSha256, syncPath, writeDurable } from './fs.ts'
+import { internalHooks } from './internal_hooks.ts'
+import { acquireCreateLock } from './lock.ts'
 import {
   DATABASE,
   MANIFEST,
@@ -26,10 +26,10 @@ import {
   requireFormattedBundleName,
   isBundleName,
   requireBundleTimestamp,
-} from './names.js'
-import { openDatabase, type NativeDatabase } from './native.js'
-import { assertSafeLayout, requireBorrowedSourcePath, openOwnedSource } from './source.js'
-import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.js'
+} from './names.ts'
+import { openDatabase, type NativeDatabase } from './native.ts'
+import { assertSafeLayout, requireBorrowedSourcePath, openOwnedSource } from './source.ts'
+import type { BundleLocation, BundleManifest, BundleSummary, CreateResult } from './types.ts'
 
 /** A clock-step allowance: a newest bundle further ahead of the clock than this is refused. */
 export const MAX_FUTURE_MS = 24 * 60 * 60 * 1000
@@ -208,6 +208,7 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
  *   directory: 'storage/backups',
  * })
  * ```
+ * @throws AggregateError when bundle creation and cleanup fail, or when multiple cleanup steps fail.
  */
 export async function createBundle(
   input: (

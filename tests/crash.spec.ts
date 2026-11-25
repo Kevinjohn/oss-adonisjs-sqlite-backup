@@ -1,4 +1,4 @@
-import { prepared } from './helpers.js'
+import { prepared } from './helpers.ts'
 /**
  * Crash safety: a create or prune SIGKILLed at each meaningful point leaves only READY bundles
  * visible, frees the lock, and the next prune removes exactly the unfinished folder.
@@ -6,10 +6,10 @@ import { prepared } from './helpers.js'
 import { test } from '@japa/runner'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { acquireLock } from '../src/lock.js'
-import { pruneBundles } from '../src/prune.js'
-import { makeLiveDatabase, runChild, createTemporaryRoot } from './helpers.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { acquireLock } from '../src/lock.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { makeLiveDatabase, runChild, createTemporaryRoot } from './helpers.ts'
 
 const listBundleDirectories = (directory: string) =>
   readdirSync(directory)

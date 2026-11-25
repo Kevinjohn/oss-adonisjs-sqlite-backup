@@ -1,10 +1,11 @@
 import { test } from '@japa/runner'
 import { join } from 'node:path'
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
-import { BACKUP_ERROR_CODES, errors } from '../index.js'
-import { defineConfig } from '../src/define_config.js'
-import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.js'
-import { resolveSqliteSource } from '../src/source.js'
+import { BACKUP_ERROR_CODES, errors } from '../index.ts'
+import { defineConfig } from '../index.ts'
+import type { BackupConfig } from '../src/types.ts'
+import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.ts'
+import { resolveSqliteSource } from '../src/source.ts'
 
 const sqlite = (filename: unknown, client = 'better-sqlite3') => ({
   connection: 'main',
@@ -120,4 +121,11 @@ test.group('config and source resolution', () => {
     assert.equal(requireBundleTimestamp(requireFormattedBundleName(ms)), ms)
     assert.throws(() => requireBundleTimestamp('nope'), /not a bundle name/)
   })
+})
+
+test('defineConfig exposes a resolved backup configuration', ({ expectTypeOf }) => {
+  const config = defineConfig({ directory: 'storage/backups' })
+  expectTypeOf(config).toEqualTypeOf<BackupConfig>()
+  expectTypeOf(config.keep).toEqualTypeOf<number>()
+  expectTypeOf(config.requireWal).toEqualTypeOf<boolean>()
 })

@@ -1,4 +1,4 @@
-import { E_BACKUP_UNSAFE } from './errors.js'
+import { E_BACKUP_UNSAFE } from './errors.ts'
 
 /** Bundle directory names: UTC timestamp, millisecond precision, strictly increasing per directory. */
 export const BUNDLE_RE = /^bak-utc-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-(\d{3})$/

@@ -1,6 +1,6 @@
 import { lstatSync, readlinkSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
-import { E_BACKUP_UNSAFE } from './errors.js'
+import { E_BACKUP_UNSAFE } from './errors.ts'
 
 /** Symlink hops followed before giving up, as Linux does (MAXSYMLINKS). */
 const MAX_LINKS = 40
