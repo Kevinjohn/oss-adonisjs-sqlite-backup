@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-### Upgrade programmatic callers
+### Breaking changes: programmatic callers
 
 The standalone API now uses two classes exported from `@kevinjohn/adonisjs-sqlite-backup`.
 Existing format-1 bundles remain readable without a data migration. The functions in the
@@ -53,10 +53,10 @@ own reference to the supplied configuration. See the [caller migration guide](DE
   identity, with the close failure in `resourceCleanupErrors`. When acquisition throws a
   non-`Error` value and close also fails, the `AggregateError` lists both original values
   in that order.
-- If native teardown fails after bundle creation, the package attempts to remove the failed
-  bundle and retains any removal failure alongside the original error. A single teardown failure
-  retains its identity, including an existing `AggregateError`. Both Ace commands keep their
-  failure in `error` for calling commands and avoid duplicate primary failure output.
+- Correct a compound lock-release failure after successful bundle creation: preserve the original
+  rollback and close failures and attempt to remove the new bundle, instead of masking the failure
+  with a `TypeError` before removal. Both Ace commands keep their failure in `error` for calling
+  commands and avoid duplicate primary failure output.
 
 ### Capacity Lens adoption
 
@@ -67,8 +67,9 @@ that includes the new API.
   the verified backup with `archive.create({ source: { database: connection } })` inside the
   operator callback. Sync the retained source files, archive directory and source parent directory
   with Node's filesystem API.
-- Move owner recovery, company initialization and installation reset to
-  `OperatorDatabase.databasePath(confirmation)` and `OperatorDatabase.run(callback)`.
+- In owner recovery, company initialization and installation reset, create
+  `const operator = new OperatorDatabase(db)`. Call `operator.databasePath(confirmation)` before
+  opening a connection, then `await operator.run(callback)`.
 - Update the backend backup configuration, provider, restore, installation reset and upgrade
   tests that use the removed imports.
 
