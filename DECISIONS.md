@@ -52,4 +52,4 @@ uses the same pattern in `build/commands/migration/run.js` and `build/commands/s
 Its `build/services/db.js` captures the application’s binding at module load, so the command must
 resolve against its own application when invoked within a process that hosts multiple apps.
 See the [service import discussion](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/issues/128)
-and the [two-app startup test](tests/app.spec.ts).
+and the [two-app command test](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/tests/app.spec.ts).

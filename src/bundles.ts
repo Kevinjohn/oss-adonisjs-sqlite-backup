@@ -365,13 +365,10 @@ export async function createBundle(
     }
     throw primaryError
   }
-  if (cleanupErrors.length) {
-    const failure =
-      cleanupErrors.length === 1
-        ? cleanupErrors[0]
-        : new AggregateError(cleanupErrors, 'native resource cleanup failed')
-    if (failure instanceof AggregateError)
-      Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
+  if (cleanupErrors.length === 1) throw cleanupFailedBundle(cleanupErrors[0])
+  if (cleanupErrors.length > 1) {
+    const failure = new AggregateError(cleanupErrors, 'native resource cleanup failed')
+    Object.defineProperty(failure, 'resourceCleanupErrors', { value: cleanupErrors })
     throw cleanupFailedBundle(failure)
   }
   return result!

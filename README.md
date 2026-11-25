@@ -38,7 +38,7 @@ the resolved `backup.config.directory` first. `backup.prepareDirectory()` refuse
 contains the configured live SQLite database with `E_BACKUP_UNSAFE`, before creating or changing
 anything. Otherwise preparation creates missing directories and tightens an existing directory to
 mode `0700`; an existing non-directory root is refused. The standalone `archive.prepareDirectory()`
-takes only the archive path. The manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
+uses the path supplied when constructing the archive. The manual `db:backup create` command checks source-layout eligibility before preparing its root. Create
 and prune never recreate a missing root. A vanished root is
 `E_BACKUP_NOT_FOUND`, as is listing a missing root. An existing empty root lists as `[]`.
 If prune fails while syncing the archive or releasing its lock, the command exits nonzero and
@@ -86,7 +86,7 @@ Create, prune and restore preparation refuse roots writable by group or others w
 `E_BACKUP_UNSAFE`. The manual `db:backup create` command prepares its root before creating a bundle.
 
 The examples below use the standalone classes in the unreleased source. For the published
-0.5.0 API, see the [README at v0.5.0](../../tree/v0.5.0#readme).
+0.5.0 API, see the [README at v0.5.0](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/v0.5.0/README.md).
 
 Standalone hosts can select an archive directly with `BackupArchive`. Create accepts exactly one
 of `livePath` or `source: { database }`, a better-sqlite3 handle. Borrowed handles stay open on
@@ -298,8 +298,10 @@ with the cleanup failure on its `cleanupError` property. The command prints the 
 and a separate cleanup-failure line, then exits 1. An unfinished bundle is never a recovery point;
 a later successful prune removes it. Restore preparation attaches `cleanupError` in the same way
 when it cannot remove the staged file it created. If lock acquisition and native close both
-fail, Ace reports the acquisition failure first and the close separately. The thrown
-`AggregateError` retains both original values in order.
+fail, Ace reports the acquisition failure first and the close separately. An acquisition
+`Error` retains its identity and carries the close failure in `resourceCleanupErrors`. If
+acquisition throws a non-`Error` value, the resulting `AggregateError` holds both original
+values in order.
 
 Stopped-server operator helpers report these preconditions and failures:
 

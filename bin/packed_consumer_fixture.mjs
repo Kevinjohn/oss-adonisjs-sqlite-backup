@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { transpileModule, ModuleKind } from 'typescript'
@@ -23,6 +23,12 @@ for (const entry of ['.', './types', './commands', './sqlite_backup_provider', '
   )
   assert(path.includes('/node_modules/'), `${entry} did not resolve from installed package`)
 }
+const packageDirectory = dirname(dirname(require.resolve('@kevinjohn/adonisjs-sqlite-backup')))
+const readme = await readFile(join(packageDirectory, 'README.md'), 'utf8')
+const decisions = await readFile(join(packageDirectory, 'DECISIONS.md'), 'utf8')
+assert.match(readme, /DECISIONS\.md#updating-callers/)
+assert.match(decisions, /^### Updating callers$/m)
+
 assert.deepEqual(Object.keys(backupPackage).sort(), [
   'BACKUP_ERROR_CODES',
   'BackupArchive',
@@ -119,12 +125,6 @@ try {
   await db.table('items').insert({ body: 'packed consumer' })
   const ace = await app.container.make('ace')
   ace.ui.switchMode('raw')
-  await ace.handle(['db:backup', '--help'])
-  const help = ace.ui.logger
-    .getLogs()
-    .map(({ message }) => message)
-    .join('\n')
-  assert.match(help, /db:backup <operation>/)
   for (const args of [['create'], ['list'], ['verify']]) {
     const result = await ace.exec('db:backup', args)
     result.assertSucceeded()
@@ -208,6 +208,12 @@ try {
   } finally {
     restored.close()
   }
+  await ace.handle(['db:backup', '--help'])
+  const help = ace.ui.logger
+    .getLogs()
+    .map(({ message }) => message)
+    .join('\n')
+  assert.match(help, /db:backup[^\n]*<operation>/)
 } finally {
   await app.terminate()
 }

@@ -311,15 +311,43 @@ test.group('db:backup inside a booted AdonisJS + Lucid app', (group) => {
 })
 
 test.group('provider', () => {
-  test('service import resolves the configured container singleton', async ({ assert }) => {
-    const { root, cleanup } = createTemporaryRoot()
-    const { app } = await bootApp(root)
+  test('Ace resolves each app’s backup binding after the service import is cached', async ({
+    assert,
+  }) => {
+    const first = createTemporaryRoot()
+    const second = createTemporaryRoot()
+    const { app, live } = await bootApp(first.root)
     try {
-      const { default: backup } = await import('../services/main.js')
-      assert.strictEqual(backup, await app.container.make('sqlite.backup'))
+      const { default: cached } = await import('../services/main.js')
+      assert.strictEqual(cached, await app.container.make('sqlite.backup'))
+      const other = await bootApp(second.root)
+      try {
+        const otherBackup = await other.app.container.make('sqlite.backup')
+        assert.notStrictEqual(cached, otherBackup)
+        const { default: reimported } = await import('../services/main.js')
+        assert.strictEqual(reimported, cached)
+        openDatabase(live).close()
+        openDatabase(other.live).close()
+
+        const firstAce = await app.container.make('ace')
+        firstAce.ui.switchMode('raw')
+        const secondAce = await other.app.container.make('ace')
+        secondAce.ui.switchMode('raw')
+        const firstRun = await firstAce.exec('db:backup', ['create'])
+        firstRun.assertSucceeded()
+        assert.lengthOf(cached.list(), 1)
+        assert.isFalse(existsSync(otherBackup.config.directory))
+        const secondRun = await secondAce.exec('db:backup', ['create'])
+        secondRun.assertSucceeded()
+        assert.lengthOf(cached.list(), 1)
+        assert.lengthOf(otherBackup.list(), 1)
+      } finally {
+        await other.app.terminate()
+      }
     } finally {
       await app.terminate()
-      cleanup()
+      first.cleanup()
+      second.cleanup()
     }
   })
   test('README startup example: disabled skips, enabled prepares, a bad source still throws', async ({
