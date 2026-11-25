@@ -37,7 +37,8 @@ export function pruneKeepProblem(keep: number): string | undefined {
  *
  * const result = pruneBundles({ directory: 'storage/backups', keep: 7 })
  * ```
- * @throws AggregateError when pruning and releasing the lock both fail, or lock release propagates multiple cleanup failures.
+ * @throws AggregateError propagated from lock acquisition or release, or created if pruning
+ * throws a non-Error value and releasing the lock also fails.
  */
 export function pruneBundles(input: {
   directory: string

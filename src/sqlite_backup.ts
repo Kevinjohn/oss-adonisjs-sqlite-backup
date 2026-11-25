@@ -97,7 +97,7 @@ export class SqliteBackup {
    * ```ts
    * const bundle = await backup.create()
    * ```
-   * @throws AggregateError when copying and cleanup both fail, or when multiple cleanup steps fail.
+   * @throws AggregateError propagated from bundle creation.
    */
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
     const directory = this.#requireBackupDirectory()
@@ -174,7 +174,7 @@ export class SqliteBackup {
    * ```ts
    * const result = backup.prune({ keep: 7 })
    * ```
-   * @throws AggregateError when pruning and releasing the lock both fail, or lock release propagates multiple cleanup failures.
+   * @throws AggregateError propagated from bundle pruning.
    */
   prune(options: { keep?: number } = {}) {
     const directory = resolveFilesystemPath(this.#requireBackupDirectory())

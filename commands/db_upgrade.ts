@@ -29,7 +29,7 @@ export default class DbUpgrade extends BaseCommand {
   #childReportedFailure = false
 
   /**
-   * @throws AggregateError when the pre-migration backup and cleanup fail, or when multiple cleanup steps fail.
+   * @throws AggregateError propagated by pre-migration bundle creation.
    */
   async run() {
     const db = await this.app.container.make('lucid.db')

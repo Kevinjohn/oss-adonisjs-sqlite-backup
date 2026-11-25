@@ -54,7 +54,7 @@ export default class DbBackup extends BaseCommand {
   }
 
   /**
-   * @throws AggregateError when a backup operation and cleanup fail, or when multiple cleanup steps fail.
+   * @throws AggregateError propagated by the create or prune operation.
    */
   async run() {
     const backup = await this.app.container.make('sqlite.backup')

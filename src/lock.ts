@@ -35,7 +35,7 @@ export function assertLockTimeout(timeoutMs: number): void {
 }
 
 /**
- * @throws AggregateError when exclusive acquisition and closing its handle both fail.
+ * @throws AggregateError when exclusive acquisition throws a non-Error value and closing also fails.
  */
 function acquireNativeLock(path: string, timeoutMs: number): NativeDatabase {
   let handle: NativeDatabase
@@ -103,7 +103,7 @@ function truncateLockFile(path: string): void {
  *   lock.release()
  * }
  * ```
- * @throws AggregateError when exclusive acquisition and closing its handle both fail.
+ * @throws AggregateError propagated from native lock acquisition.
  */
 export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   assertLockTimeout(timeoutMs)
@@ -170,7 +170,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
 /**
  * Wait for a create lock without blocking the event loop needed by an in-process backup.
  *
- * @throws AggregateError when lock acquisition and closing its handle both fail.
+ * @throws AggregateError propagated from lock acquisition.
  */
 export async function acquireCreateLock(directory: string, timeoutMs = 0): Promise<DirectoryLock> {
   assertLockTimeout(timeoutMs)

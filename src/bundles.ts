@@ -208,7 +208,9 @@ export function verifyBundle(folder: string, name?: string): BundleLocation {
  *   directory: 'storage/backups',
  * })
  * ```
- * @throws AggregateError when bundle creation and cleanup fail, or when multiple cleanup steps fail.
+ * @throws AggregateError propagated from lock acquisition or release, or created if bundle
+ * creation throws a non-Error value and cleanup fails, or if multiple native cleanup steps fail
+ * after successful creation.
  */
 export async function createBundle(
   input: (
