@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { BackupArchive } from '../index.ts'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
 import { prepareDirectory } from '../src/directory.ts'
 import { defineConfig } from '../src/define_config.ts'
@@ -41,6 +42,41 @@ test.group('host adoption contracts', (group) => {
       delete internalHooks.step
       cleanup()
     }
+  })
+
+  test('standalone archive methods share the selected root and coordinate writes', async ({
+    assert,
+  }) => {
+    makeLiveDatabase(live).close()
+    const archive = new BackupArchive(directory)
+    archive.prepareDirectory()
+    const lock = archive.acquireLock()
+    try {
+      assert.equal(
+        await readBackupErrorCode(() => archive.create({ livePath: live })),
+        'E_BACKUP_LOCKED'
+      )
+    } finally {
+      lock.release()
+    }
+
+    const first = await archive.create({ livePath: live })
+    const latest = await archive.create({ livePath: live })
+    assert.deepEqual(
+      archive.list().map(({ name }) => name),
+      [first.name, latest.name]
+    )
+    assert.equal(archive.verify().name, latest.name)
+    const target = join(root, 'recovered.db')
+    assert.deepEqual(archive.prepareRestore({ livePath: live, target, name: first.name }), {
+      bundle: first.name,
+      target,
+    })
+    assert.deepEqual(archive.prune({ keep: 1 }), {
+      removed: [first.name],
+      abandoned: [],
+      failed: [],
+    })
   })
 
   test('borrowed exclusive handle stays usable on success and failure; path form refuses the lock', async ({

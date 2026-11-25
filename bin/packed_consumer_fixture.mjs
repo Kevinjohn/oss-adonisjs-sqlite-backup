@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { existsSync } from 'node:fs'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { transpileModule, ModuleKind } from 'typescript'
@@ -23,6 +23,22 @@ for (const entry of ['.', './types', './commands', './sqlite_backup_provider', '
   )
   assert(path.includes('/node_modules/'), `${entry} did not resolve from installed package`)
 }
+const packageDirectory = dirname(dirname(require.resolve('@kevinjohn/adonisjs-sqlite-backup')))
+const readme = await readFile(join(packageDirectory, 'README.md'), 'utf8')
+const decisions = await readFile(join(packageDirectory, 'DECISIONS.md'), 'utf8')
+assert.match(readme, /DECISIONS\.md#updating-callers/)
+assert.match(decisions, /^### Updating callers$/m)
+
+assert.deepEqual(Object.keys(backupPackage).sort(), [
+  'BACKUP_ERROR_CODES',
+  'BackupArchive',
+  'OperatorDatabase',
+  'SqliteBackup',
+  'configure',
+  'defineConfig',
+  'errors',
+  'stubsRoot',
+])
 assert.equal(typeof backupPackage.configure, 'function')
 assert.equal(typeof backupPackage.defineConfig, 'function')
 assert.equal(typeof backupCommands.getCommand, 'function')
@@ -32,7 +48,7 @@ assert.deepEqual(commandMetadata.map((command) => command.commandName).sort(), [
   'db:upgrade',
 ])
 const backupMetadata = commandMetadata.find(({ commandName }) => commandName === 'db:backup')
-assert.equal(backupMetadata.args[0].name, 'action')
+assert.equal(backupMetadata.args[0].name, 'operation')
 assert.equal((await backupCommands.getCommand(backupMetadata)).commandName, 'db:backup')
 assert.equal(typeof BackupProvider, 'function')
 assert(backupTypes)
@@ -86,6 +102,7 @@ const ignitor = new IgnitorFactory()
             client: 'better-sqlite3',
             connection: { filename: live },
             useNullAsDefault: true,
+            pool: { min: 0, max: 1 },
           },
         },
       }),
@@ -160,8 +177,43 @@ try {
   const schema = await readFile(join(root, 'database', 'schema.ts'), 'utf8')
   assert.match(schema, /class UpgradeCheckSchema/)
   assert.equal(service.list().length, 1)
-  const upgradeArchive = backupPackage.preMigrationBackupDirectory(live, service.config.directory)
-  assert.equal(backupPackage.listBundles(upgradeArchive).length, 1)
+  const { BackupArchive, OperatorDatabase } = backupPackage
+  const upgradeArchive = new BackupArchive(join(service.config.directory, 'pre-migration'))
+  assert.equal(upgradeArchive.list().length, 1)
+  upgradeArchive.verify()
+
+  // Exercise both file and borrowed sources using the installed, standalone API.
+  const archive = new BackupArchive(join(root, 'standalone'))
+  archive.prepareDirectory()
+  const owned = await archive.create({ livePath: live })
+  assert.equal(archive.verify().name, owned.name)
+  const operator = new OperatorDatabase(db)
+  assert.equal(operator.databasePath(true), live)
+  await operator.run(async (database) => {
+    const borrowed = await archive.create({ source: { database } })
+    assert.equal(archive.verify().name, borrowed.name)
+    assert.deepEqual(database.prepare('SELECT body FROM items ORDER BY id').all(), [
+      { body: 'packed consumer' },
+      { body: 'live only' },
+    ])
+  })
+  const standaloneTarget = join(root, 'standalone-staged.db')
+  archive.prepareRestore({ livePath: live, target: standaloneTarget, name: owned.name })
+  const restored = new Database(standaloneTarget, { readonly: true, fileMustExist: true })
+  try {
+    assert.deepEqual(restored.prepare('SELECT body FROM items ORDER BY id').all(), [
+      { body: 'packed consumer' },
+      { body: 'live only' },
+    ])
+  } finally {
+    restored.close()
+  }
+  await ace.handle(['db:backup', '--help'])
+  const help = ace.ui.logger
+    .getLogs()
+    .map(({ message }) => message)
+    .join('\n')
+  assert.match(help, /db:backup[^\n]*<operation>/)
 } finally {
   await app.terminate()
 }

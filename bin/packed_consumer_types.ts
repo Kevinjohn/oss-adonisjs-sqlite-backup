@@ -1,10 +1,11 @@
+import type { Database } from '@adonisjs/lucid/database'
 import {
   configure,
   defineConfig,
   errors,
   SqliteBackup,
-  createBundle,
-  acquireLock,
+  BackupArchive,
+  OperatorDatabase,
 } from '@kevinjohn/adonisjs-sqlite-backup'
 import type {
   BackupErrorCode as RootErrorCode,
@@ -25,11 +26,20 @@ void [configure, defineConfig, SqliteBackup, getCommand, getMetaData, BackupProv
 export function publicTypes(
   config: BackupConfigInput,
   database: NativeDatabase,
-  code: BackupErrorCode
+  code: BackupErrorCode,
+  lucid: Database
 ) {
   const rootDatabase: RootDatabase = database
   const rootCode: RootErrorCode = code
-  const lock: DirectoryLock = acquireLock('/archive', 0)
+  const archive = new BackupArchive('/archive')
+  const lock: DirectoryLock = archive.acquireLock(0)
+  const operator = new OperatorDatabase(lucid)
+  const path: string = operator.databasePath(true)
+  const operation: Promise<number> = operator.run(async (handle) => {
+    const borrowed: NativeDatabase = handle
+    const bundle = await archive.create({ source: { database: borrowed } })
+    return bundle.manifest.bytes
+  })
   const rootLock: RootLock = lock
   const service: SqliteBackup = backup
   try {
@@ -39,10 +49,10 @@ export function publicTypes(
     const missingCode: 'E_BACKUP_NOT_FOUND' = error.code
     void missingCode
   }
-  void createBundle({ livePath: '/live.db', directory: '/archive' })
-  void createBundle({ source: { database: rootDatabase }, directory: '/archive' })
+  void archive.create({ livePath: path })
+  void archive.create({ source: { database: rootDatabase } })
   void service.create({ database })
   // @ts-expect-error Owned and borrowed sources are mutually exclusive.
-  void createBundle({ livePath: '/live.db', source: { database }, directory: '/archive' })
-  return [defineConfig(config), rootCode, rootLock]
+  void archive.create({ livePath: path, source: { database } })
+  return [defineConfig(config), rootCode, rootLock, operation]
 }

@@ -1,17 +1,10 @@
 import { createHash } from 'node:crypto'
 import { closeSync, fsyncSync, openSync, readSync, writeSync } from 'node:fs'
-import { E_BACKUP_INVALID } from './errors.ts'
+import { E_BACKUP_WRITE } from './errors.ts'
 import { internalHooks } from './internal_hooks.ts'
 
 /**
  * fsync a file or directory by path.
- *
- * @example
- * ```ts
- * import { syncPath } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * syncPath('storage/backups')
- * ```
  */
 export function syncPath(path: string): void {
   const fd = openSync(path, 'r')
@@ -35,7 +28,7 @@ export function writeAll(
   for (let offset = 0; offset < data.length;) {
     const written = write(fd, data, offset)
     if (written <= 0)
-      throw new E_BACKUP_INVALID(`write stopped after ${offset} of ${data.length} bytes`)
+      throw new E_BACKUP_WRITE(`write stopped after ${offset} of ${data.length} bytes`)
     offset += written
   }
 }

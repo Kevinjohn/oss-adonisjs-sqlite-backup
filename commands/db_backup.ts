@@ -31,7 +31,7 @@ export default class DbBackup extends BaseCommand {
   static options: CommandOptions = { startApp: true }
 
   @args.string({ description: OPERATIONS.join(' | ') })
-  declare action: string
+  declare operation: string
 
   @flags.string({ description: 'Bundle name for verify / restore-prepare (default: newest READY)' })
   declare bundle?: string
@@ -60,13 +60,13 @@ export default class DbBackup extends BaseCommand {
     const backup = await this.app.container.make('sqlite.backup')
     for (const [flag, operations] of Object.entries(FLAG_OPERATIONS)) {
       if (this[flag as keyof typeof FLAG_OPERATIONS] === undefined) continue
-      if (!(operations as readonly string[]).includes(this.action)) {
+      if (!(operations as readonly string[]).includes(this.operation)) {
         throw new E_BACKUP_UNSAFE(
           `--${flag} is only supported for ${formatFlagOperationNames(operations)}`
         )
       }
     }
-    switch (this.action) {
+    switch (this.operation) {
       case 'create': {
         assertSafeLayout(backup.livePath(), resolveFilesystemPath(backup.config.directory))
         backup.prepareDirectory()
@@ -109,7 +109,9 @@ export default class DbBackup extends BaseCommand {
         return
       }
       default:
-        throw new E_BACKUP_UNSAFE(`unknown action "${this.action}" (use ${OPERATIONS.join(', ')})`)
+        throw new E_BACKUP_UNSAFE(
+          `unknown operation "${this.operation}" (use ${OPERATIONS.join(', ')})`
+        )
     }
   }
 
@@ -119,7 +121,11 @@ export default class DbBackup extends BaseCommand {
     const backupCode = BACKUP_ERROR_CODES.find((code) => error instanceof errors[code])
     const code = backupCode ? `${backupCode}: ` : ''
     const message = error instanceof Error ? error.message : String(error)
-    this.logger.error(`db:backup ${this.action} failed: ${code}${message}`)
+    const primary =
+      error instanceof AggregateError && Object.hasOwn(error, 'cause')
+        ? `: ${String(error.cause)}`
+        : ''
+    this.logger.error(`db:backup ${this.operation} failed: ${code}${message}${primary}`)
     const progress = (error as { pruneProgress?: PruneProgress } | null | undefined)?.pruneProgress
     if (progress) {
       this.#reportPruneFailures(progress.failed)
@@ -137,8 +143,7 @@ export default class DbBackup extends BaseCommand {
     const resourceErrors =
       (error !== null && typeof error === 'object'
         ? (error as { resourceCleanupErrors?: unknown[] }).resourceCleanupErrors
-        : undefined) ??
-      (error instanceof AggregateError && !Object.hasOwn(error, 'cleanupError') ? error.errors : [])
+        : undefined) ?? []
     for (const resourceError of resourceErrors) {
       this.logger.error(`backup native cleanup failed: ${String(resourceError)}`)
       const nestedErrors =

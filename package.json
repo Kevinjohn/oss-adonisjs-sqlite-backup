@@ -20,7 +20,8 @@
     "build",
     "!build/bin",
     "!build/tests",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "DECISIONS.md"
   ],
   "main": "./build/index.js",
   "exports": {

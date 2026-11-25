@@ -30,13 +30,6 @@ export function pruneKeepProblem(keep: number): string | undefined {
  * an unfinished bundle seen under the lock belongs to a create that crashed. Only directories
  * matching the bundle name pattern are ever touched. Per-item failures are returned in the result.
  * If finalization fails, the thrown error carries the observed `pruneProgress`.
- *
- * @example
- * ```ts
- * import { pruneBundles } from '@kevinjohn/adonisjs-sqlite-backup'
- *
- * const result = pruneBundles({ directory: 'storage/backups', keep: 7 })
- * ```
  * @throws AggregateError propagated from lock acquisition or release, or created if pruning
  * throws a non-Error value and releasing the lock also fails.
  */

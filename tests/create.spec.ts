@@ -13,6 +13,7 @@ import {
   symlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
+import { BackupArchive } from '../index.ts'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
 import { readDatabaseIntegrityProblem } from '../src/checks.ts'
 import { acquireLock } from '../src/lock.ts'
@@ -368,6 +369,52 @@ test.group('createBundle', (group) => {
     } finally {
       prototype.close = originalClose
       for (const handle of handles) originalClose.call(handle)
+    }
+  })
+
+  test('preserves the failed lock release aggregate and unpublishes the copied bundle', async ({
+    assert,
+  }) => {
+    const livePath = join(root, 'live.db')
+    makeLiveDatabase(livePath).close()
+    const archive = new BackupArchive(join(root, 'b'))
+    archive.prepareDirectory()
+    const lockPath = join(archive.directory, '.backup.lock')
+    const prototype = Database.prototype as {
+      exec: (this: { name: string }, sql: string) => unknown
+      close: (this: { name: string }) => void
+    }
+    const originalExec = prototype.exec
+    const originalClose = prototype.close
+    const closeFailure = new Error('lock close failed')
+    let lockHandle: { name: string } | undefined
+    prototype.exec = function (sql) {
+      if (this.name === lockPath && sql === 'ROLLBACK') throw false
+      return originalExec.call(this, sql)
+    }
+    prototype.close = function () {
+      if (this.name === lockPath) {
+        lockHandle = this
+        throw closeFailure
+      }
+      originalClose.call(this)
+    }
+    try {
+      const failure: unknown = await archive.create({ livePath }).catch((error: unknown) => error)
+      assert.instanceOf(failure, AggregateError)
+      const aggregate = failure as AggregateError & { resourceCleanupErrors: unknown[] }
+      assert.strictEqual(aggregate.errors[0], false)
+      assert.strictEqual(aggregate.errors[1], closeFailure)
+      assert.deepEqual(aggregate.resourceCleanupErrors, aggregate.errors)
+      assert.deepEqual(archive.list(), [])
+      assert.deepEqual(
+        readdirSync(archive.directory).filter((name) => name.startsWith('bak-')),
+        []
+      )
+    } finally {
+      prototype.exec = originalExec
+      prototype.close = originalClose
+      if (lockHandle) originalClose.call(lockHandle)
     }
   })
 

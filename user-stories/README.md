@@ -17,7 +17,7 @@ The README and source define available operations. “Operator” describes wher
 | [US-OP-04 — Prepare a verified restore copy](prepare-restore/us-op-04-prepare-restore.md)                       | Prepare a verified restore copy without live replacement                            | Host operator        | Operator   |
 | [US-OP-05 — Prune older and unfinished backup bundles](prune-bundles/us-op-05-prune-bundles.md)                 | Prune older and unfinished backup bundles                                           | Host operator        | Operator   |
 | [US-OP-06 — Back up, then migrate the database](upgrade-database/us-op-06-upgrade-database.md)                  | Create a pre-migration backup bundle, then run pending migrations with `db:upgrade` | Host operator        | Operator   |
-| [US-OP-07 — Run a stopped-server operator command](operator-guards/us-op-07-stopped-server-operator-command.md) | Check operator preconditions with `operatorDatabasePath` and `withOperatorDatabase` | Host operator        | Operator   |
+| [US-OP-07 — Run a stopped-server operator command](operator-guards/us-op-07-stopped-server-operator-command.md) | Check operator preconditions with `OperatorDatabase`                                | Host operator        | Operator   |
 | [US-INT-01 — Run backups from a host application](integration/us-int-01-programmatic-backups.md)                | Select a source and consume a verified result                                       | Host developer       | Public API |
 | [US-INT-02 — Coordinate a host operation with archive writers](integration/us-int-02-archive-lock.md)           | Acquire and release an archive lock                                                 | Host developer       | Public API |
 

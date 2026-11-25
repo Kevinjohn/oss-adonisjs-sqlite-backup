@@ -21,7 +21,7 @@ As a host operator, I want to retain only the newest configured number of READY 
 - It touches only directories matching the bundle naming pattern. Per-bundle removals that fail are returned and warned; any failure makes command exit nonzero.
 - `prune` always uses configured root; `--directory` is not accepted. If root disappears, it is not recreated during prune.
 
-- Prune counts READY presence, including a publication that listing would reject for a malformed manifest. The standalone helper takes a root and retention count. The configured service also rejects a root containing a resolvable live database. [Retention scan](../../src/prune.ts), [service](../../src/sqlite_backup.ts)
+- Prune counts READY presence, including a publication that listing would reject for a malformed manifest. The standalone method takes a retention count and uses the `BackupArchive` instance’s directory. The configured service also rejects a root containing a resolvable live database. [Archive method](../../src/backup_archive.ts), [retention scan](../../src/prune.ts), [service](../../src/sqlite_backup.ts)
 - If archive sync or lock release fails after removals, the error includes observed progress; Ace reports observed removals, per-item failures and unconfirmed durability where applicable.
 
 ## User flow
