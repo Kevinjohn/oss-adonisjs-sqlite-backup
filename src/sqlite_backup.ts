@@ -1,12 +1,12 @@
-import { createBundle, listBundles, verifyBundle } from './bundles.js'
-import { prepareDirectory } from './directory.js'
-import { E_BACKUP_DISABLED, E_BACKUP_SOURCE } from './errors.js'
-import type { NativeDatabase } from './native.js'
-import { resolveFilesystemPath } from './paths.js'
-import { pruneBundles } from './prune.js'
-import { prepareRestore } from './restore.js'
-import { assertSourceOutsideDirectory, openOwnedSource, resolveSqliteSource } from './source.js'
-import type { BackupConfig, LucidDatabaseConfig } from './types.js'
+import { createBundle, listBundles, verifyBundle } from './bundles.ts'
+import { prepareDirectory } from './directory.ts'
+import { E_BACKUP_DISABLED, E_BACKUP_SOURCE } from './errors.ts'
+import type { NativeDatabase } from './native.ts'
+import { resolveFilesystemPath } from './paths.ts'
+import { pruneBundles } from './prune.ts'
+import { prepareRestore } from './restore.ts'
+import { assertSourceOutsideDirectory, openOwnedSource, resolveSqliteSource } from './source.ts'
+import type { BackupConfig, LucidDatabaseConfig } from './types.ts'
 
 /**
  * Backup service bound in the container as `sqlite.backup`.
@@ -32,7 +32,7 @@ export class SqliteBackup {
     protected database: LucidDatabaseConfig | undefined
   ) {}
 
-  private requireBackupDirectory(override?: string): string {
+  #requireBackupDirectory(override?: string): string {
     const directory = override ?? this.config.directory
     if (!directory) throw new E_BACKUP_DISABLED()
     return directory
@@ -47,7 +47,7 @@ export class SqliteBackup {
    * ```
    */
   livePath(): string {
-    this.requireBackupDirectory()
+    this.#requireBackupDirectory()
     return resolveSqliteSource(this.database, this.config.connection)
   }
 
@@ -85,8 +85,8 @@ export class SqliteBackup {
    * ```
    */
   prepareDirectory(): void {
-    const directory = resolveFilesystemPath(this.requireBackupDirectory())
-    this.rejectLiveDatabaseInside(directory)
+    const directory = resolveFilesystemPath(this.#requireBackupDirectory())
+    this.#rejectLiveDatabaseInside(directory)
     prepareDirectory(directory)
   }
 
@@ -97,9 +97,10 @@ export class SqliteBackup {
    * ```ts
    * const bundle = await backup.create()
    * ```
+   * @throws AggregateError propagated from bundle creation.
    */
   create(options: { now?: () => number; database?: NativeDatabase } = {}) {
-    const directory = this.requireBackupDirectory()
+    const directory = this.#requireBackupDirectory()
     const connection = this.config.connection ?? this.database?.connection
     return createBundle({
       ...(options.database
@@ -124,7 +125,7 @@ export class SqliteBackup {
    * ```
    */
   list(directory?: string) {
-    return listBundles(this.requireBackupDirectory(directory))
+    return listBundles(this.#requireBackupDirectory(directory))
   }
 
   /**
@@ -136,7 +137,7 @@ export class SqliteBackup {
    * ```
    */
   verify(name?: string, directory?: string) {
-    return verifyBundle(this.requireBackupDirectory(directory), name)
+    return verifyBundle(this.#requireBackupDirectory(directory), name)
   }
 
   /**
@@ -150,12 +151,12 @@ export class SqliteBackup {
   prepareRestore(input: { target: string; name?: string; directory?: string }) {
     return prepareRestore({
       ...input,
-      directory: this.requireBackupDirectory(input.directory),
+      directory: this.#requireBackupDirectory(input.directory),
       livePath: resolveSqliteSource(this.database, this.config.connection),
     })
   }
 
-  private rejectLiveDatabaseInside(directory: string): void {
+  #rejectLiveDatabaseInside(directory: string): void {
     let livePath: string | undefined
     try {
       livePath = resolveSqliteSource(this.database, this.config.connection)
@@ -173,10 +174,11 @@ export class SqliteBackup {
    * ```ts
    * const result = backup.prune({ keep: 7 })
    * ```
+   * @throws AggregateError propagated from bundle pruning.
    */
   prune(options: { keep?: number } = {}) {
-    const directory = resolveFilesystemPath(this.requireBackupDirectory())
-    this.rejectLiveDatabaseInside(directory)
+    const directory = resolveFilesystemPath(this.#requireBackupDirectory())
+    this.#rejectLiveDatabaseInside(directory)
     return pruneBundles({
       directory,
       keep: options.keep ?? this.config.keep,

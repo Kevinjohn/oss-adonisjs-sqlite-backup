@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Ace configure now registers the Lucid command loader used for schema generation after
+  `db:upgrade`.
 - Preserve command errors for callers while reporting backup and upgrade failures once.
 
 ## 0.5.0 - 2026-11-24

@@ -1,14 +1,14 @@
 import { existsSync, rmSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
-import { assertDirectory } from './directory.js'
-import { listBundleDirectoryNames } from './bundles.js'
+import { assertDirectory } from './directory.ts'
+import { listBundleDirectoryNames } from './bundles.ts'
 import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
-import { resolveFilesystemPath } from './paths.js'
-import { syncPath } from './fs.js'
-import { internalHooks } from './internal_hooks.js'
-import { acquireLock } from './lock.js'
-import { READY } from './names.js'
-import type { PruneProgress, PruneResult } from './types.js'
+import { resolveFilesystemPath } from './paths.ts'
+import { syncPath } from './fs.ts'
+import { internalHooks } from './internal_hooks.ts'
+import { acquireLock } from './lock.ts'
+import { READY } from './names.ts'
+import type { PruneProgress, PruneResult } from './types.ts'
 
 function attachProgress(error: unknown, progress: PruneProgress): Error {
   const failure =
@@ -37,6 +37,8 @@ export function pruneKeepProblem(keep: number): string | undefined {
  *
  * const result = pruneBundles({ directory: 'storage/backups', keep: 7 })
  * ```
+ * @throws AggregateError propagated from lock acquisition or release, or created if pruning
+ * throws a non-Error value and releasing the lock also fails.
  */
 export function pruneBundles(input: {
   directory: string
@@ -55,8 +57,8 @@ export function pruneBundles(input: {
     const ready: string[] = []
     const unfinished: string[] = []
     for (const name of listBundleDirectoryNames(directory)) {
-      const group = existsSync(join(directory, name, READY)) ? ready : unfinished
-      group.push(name)
+      const destination = existsSync(join(directory, name, READY)) ? ready : unfinished
+      destination.push(name)
     }
     const remove = (name: string, into: string[]) => {
       const path = join(directory, name)

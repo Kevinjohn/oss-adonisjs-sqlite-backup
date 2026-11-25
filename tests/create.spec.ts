@@ -1,4 +1,4 @@
-import { prepared } from './helpers.js'
+import { prepared } from './helpers.ts'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 import { test } from '@japa/runner'
@@ -13,13 +13,13 @@ import {
   symlinkSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { readDatabaseIntegrityProblem } from '../src/checks.js'
-import { acquireLock } from '../src/lock.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { requireFormattedBundleName } from '../src/names.js'
-import { openDatabase } from '../src/native.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { readDatabaseIntegrityProblem } from '../src/checks.ts'
+import { acquireLock } from '../src/lock.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { requireFormattedBundleName } from '../src/names.ts'
+import { openDatabase } from '../src/native.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
 import {
   countItems,
   makeLiveDatabase,
@@ -28,7 +28,7 @@ import {
   stopChild,
   createTemporaryRoot,
   within,
-} from './helpers.js'
+} from './helpers.ts'
 
 const code = (error: unknown) => (error as { code?: string }).code
 

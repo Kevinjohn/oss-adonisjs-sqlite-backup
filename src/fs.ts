@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { closeSync, fsyncSync, openSync, readSync, writeSync } from 'node:fs'
-import { E_BACKUP_INVALID } from './errors.js'
-import { internalHooks } from './internal_hooks.js'
+import { E_BACKUP_INVALID } from './errors.ts'
+import { internalHooks } from './internal_hooks.ts'
 
 /**
  * fsync a file or directory by path.

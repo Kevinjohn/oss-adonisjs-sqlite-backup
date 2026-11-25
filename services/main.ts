@@ -1,6 +1,6 @@
 import app from '@adonisjs/core/services/app'
-import type { SqliteBackup } from '../src/sqlite_backup.js'
-import type {} from '../providers/sqlite_backup_provider.js'
+import type { SqliteBackup } from '../src/sqlite_backup.ts'
+import type {} from '../providers/sqlite_backup_provider.ts'
 
 /**
  * The configured application's backup service, resolved once the application has booted.

@@ -1,8 +1,8 @@
 import { RuntimeException } from '@adonisjs/core/exceptions'
 import type { ApplicationService } from '@adonisjs/core/types'
-import { defineConfig } from '../src/define_config.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
-import type { BackupConfig, LucidDatabaseConfig } from '../src/types.js'
+import { defineConfig } from '../src/define_config.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
+import type { BackupConfig, LucidDatabaseConfig } from '../src/types.ts'
 
 declare module '@adonisjs/core/types' {
   interface ContainerBindings {

@@ -8,12 +8,12 @@
  */
 import { statSync } from 'node:fs'
 import { Worker } from 'node:worker_threads'
-import { prepareDirectory } from '../../src/directory.js'
-import { createBundle } from '../../src/bundles.js'
-import { internalHooks } from '../../src/internal_hooks.js'
-import { acquireLock } from '../../src/lock.js'
-import { openDatabase } from '../../src/native.js'
-import { pruneBundles } from '../../src/prune.js'
+import { prepareDirectory } from '../../src/directory.ts'
+import { createBundle } from '../../src/bundles.ts'
+import { internalHooks } from '../../src/internal_hooks.ts'
+import { acquireLock } from '../../src/lock.ts'
+import { openDatabase } from '../../src/native.ts'
+import { pruneBundles } from '../../src/prune.ts'
 
 const [mode, path, arg, at] = process.argv.slice(2) as [string, string, string?, string?]
 const die = () => process.kill(process.pid, 'SIGKILL')

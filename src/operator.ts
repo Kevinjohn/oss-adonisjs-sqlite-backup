@@ -1,9 +1,9 @@
 import { existsSync, lstatSync } from 'node:fs'
 import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import type { Database } from '@adonisjs/lucid/database'
-import { E_BACKUP_LOCKED, E_BACKUP_SOURCE } from './errors.js'
-import type { NativeDatabase } from './native.js'
-import { normalizeConfiguredSqliteFilename } from './source.js'
+import { E_BACKUP_LOCKED, E_BACKUP_SOURCE } from './errors.ts'
+import type { NativeDatabase } from './native.ts'
+import { normalizeConfiguredSqliteFilename } from './source.ts'
 
 /**
  * Checks that a stopped-server operator command may open the primary connection, and returns the
@@ -91,6 +91,7 @@ const activeOperators = new WeakSet<Database>()
  *   return createBundle({ source: { database }, directory: 'storage/backups' })
  * })
  * ```
+ * @throws AggregateError when operator work and cleanup both fail, or when multiple cleanup steps fail.
  */
 export async function withOperatorDatabase<T>(
   db: Database,
@@ -106,6 +107,9 @@ export async function withOperatorDatabase<T>(
   }
 }
 
+/**
+ * @throws AggregateError when work and cleanup both fail, or when multiple cleanup steps fail.
+ */
 async function runOperatorDatabase<T>(
   db: Database,
   run: (connection: NativeDatabase) => Promise<T>

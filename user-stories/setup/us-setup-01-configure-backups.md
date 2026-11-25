@@ -19,7 +19,7 @@ As an application operator, I want to configure the Lucid connection, private ba
 | `lockTimeoutMs` | Integer milliseconds      | Defaults to 0; range 0–2,147,483,647                                                                                                    |
 | `requireWal`    | Boolean                   | Defaults to false; true refuses sources not in WAL mode                                                                                 |
 
-- Ace configure requires the host's `@adonisjs/assembler` for codemods, writes the config stub and registers the provider and the package command loader (`@kevinjohn/adonisjs-sqlite-backup/commands`), which provides `db:backup` and `db:upgrade`. Upgrade additionally needs Lucid's command registration. The provider binds `sqlite.backup` from backup and Lucid config; the boot-aware `@kevinjohn/adonisjs-sqlite-backup/services/main` import resolves the same singleton.
+- Ace configure requires the host's `@adonisjs/assembler` for codemods, writes the config stub and registers the provider and the package command loader (`@kevinjohn/adonisjs-sqlite-backup/commands`), which provides `db:backup` and `db:upgrade`. Configure also registers the Lucid command loader for schema generation after upgrade. The provider binds `sqlite.backup` from backup and Lucid config; the boot-aware `@kevinjohn/adonisjs-sqlite-backup/services/main` import resolves the same singleton.
 - `defineConfig` rejects invalid `connection`, `requireWal`, `directory`, `keep` and `lockTimeoutMs` with AdonisJS’s `InvalidArgumentsException`. An absent or empty directory disables configured service operations. List, verify and restore preparation still accept an explicit archive root.
 - At host startup, check the resolved `backup.config.directory` first. When it is empty, configured backups are disabled: the provider still boots, `checkSource()`, `prepareDirectory()`, `create()` and `prune()` would throw `E_BACKUP_DISABLED`, so the host skips them and schedules nothing, and recovery reads take an explicit directory. When it is set, `checkSource()` can fail fast without making a bundle; call `prepareDirectory()` once to create/tighten the root to `0700` before scheduling create then prune. `prepareDirectory()` refuses a root that contains the configured live database with `E_BACKUP_UNSAFE` before creating or changing anything. An unreadable source or unsafe root still throws and stops startup.
 - Service calls to `create()` and `prune()` require an existing backup root and do not recreate a vanished one. The `db:backup create` command calls `prepareDirectory()` before `create()`; callers using the service directly must prepare the root themselves. Host owns scheduling and any later switch to a staged restore file.
@@ -47,7 +47,7 @@ Scope: operator setup and backup-root behaviour in service and command entry poi
 
 ```mermaid
 flowchart TD
-    A["configure(command) writes config and registers provider and command loader"] --> B["Provider registers lazy singleton"]
+    A["configure(command) writes config and registers provider and both command loaders"] --> B["Provider registers lazy singleton"]
     B --> B1{"Backup config present and valid?"}
     B1 -->|Missing| X["Throw RuntimeException on singleton resolution"]
     B1 -->|Invalid| X1["defineConfig throws InvalidArgumentsException"]

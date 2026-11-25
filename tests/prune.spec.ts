@@ -1,24 +1,24 @@
-import { prepared } from './helpers.js'
+import { prepared } from './helpers.ts'
 import { test } from '@japa/runner'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 import { chmodSync, existsSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
-import { createBundle, listBundles } from '../src/bundles.js'
-import { defineConfig } from '../src/define_config.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { acquireLock } from '../src/lock.js'
-import { pruneBundles } from '../src/prune.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
-import type { PruneProgress } from '../src/types.js'
+import { createBundle, listBundles } from '../src/bundles.ts'
+import { defineConfig } from '../src/define_config.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { acquireLock } from '../src/lock.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
+import type { PruneProgress } from '../src/types.ts'
 import {
   failDirectorySync,
   makeLiveDatabase,
   startChild,
   stopChild,
   createTemporaryRoot,
-} from './helpers.js'
+} from './helpers.ts'
 
 test.group('pruneBundles', (group) => {
   let root: string

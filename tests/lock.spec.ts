@@ -1,12 +1,12 @@
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
-import { errors } from '../index.js'
+import { errors } from '../index.ts'
 // @ts-expect-error better-sqlite3 does not publish declarations
 import Database from 'better-sqlite3'
 import { linkSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { acquireCreateLock, acquireLock } from '../src/lock.js'
-import { startChild, stopChild, createTemporaryRoot } from './helpers.js'
+import { acquireCreateLock, acquireLock } from '../src/lock.ts'
+import { startChild, stopChild, createTemporaryRoot } from './helpers.ts'
 
 test.group('Directory lock', () => {
   test('rejects unsupported timeout before touching the lock path', ({ assert }) => {

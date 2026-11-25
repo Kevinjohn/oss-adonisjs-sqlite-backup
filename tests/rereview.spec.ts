@@ -1,5 +1,4 @@
-import { BACKUP_ERROR_CODES, errors } from '../index.js'
-import { prepared } from './helpers.js'
+import { readBackupErrorCode, prepared } from './helpers.ts'
 /**
  * Re-review findings (phase 6). Each test names the finding or mutation it pins.
  */
@@ -15,23 +14,12 @@ import {
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { acquireLock } from '../src/lock.js'
-import { openDatabase } from '../src/native.js'
-import { prepareRestore } from '../src/restore.js'
-import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
-
-const readBackupErrorCode = async (fn: () => unknown) => {
-  try {
-    await fn()
-  } catch (error) {
-    const code = (error as { code?: string }).code
-    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
-    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
-  }
-  return 'no error'
-}
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { acquireLock } from '../src/lock.ts'
+import { openDatabase } from '../src/native.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.ts'
 
 test.group('re-review', (group) => {
   let root: string

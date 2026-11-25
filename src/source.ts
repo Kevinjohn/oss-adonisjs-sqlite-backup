@@ -1,9 +1,9 @@
 import { statSync } from 'node:fs'
 import { isAbsolute, relative, sep } from 'node:path'
-import { E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.js'
-import { openDatabase, type NativeDatabase } from './native.js'
-import { resolveFilesystemPath } from './paths.js'
-import type { LucidDatabaseConfig } from './types.js'
+import { E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.ts'
+import { openDatabase, type NativeDatabase } from './native.ts'
+import { resolveFilesystemPath } from './paths.ts'
+import type { LucidDatabaseConfig } from './types.ts'
 
 const SQLITE_CLIENTS = new Set(['better-sqlite3', 'sqlite3', 'sqlite'])
 

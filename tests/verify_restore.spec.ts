@@ -1,5 +1,5 @@
-import { BACKUP_ERROR_CODES, errors } from '../index.js'
-import { prepared } from './helpers.js'
+import { BACKUP_ERROR_CODES, errors } from '../index.ts'
+import { prepared } from './helpers.ts'
 import { test } from '@japa/runner'
 import {
   chmodSync,
@@ -14,12 +14,12 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, verifyBundle } from '../src/bundles.js'
-import { acquireLock } from '../src/lock.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { openDatabase } from '../src/native.js'
-import { prepareRestore } from '../src/restore.js'
-import { countItems, makeLiveDatabase, overwrite, createTemporaryRoot } from './helpers.js'
+import { createBundle, verifyBundle } from '../src/bundles.ts'
+import { acquireLock } from '../src/lock.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { openDatabase } from '../src/native.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { countItems, makeLiveDatabase, overwrite, createTemporaryRoot } from './helpers.ts'
 
 const readBackupErrorCode = (fn: () => unknown) => {
   try {

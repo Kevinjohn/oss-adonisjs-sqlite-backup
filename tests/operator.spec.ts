@@ -1,16 +1,16 @@
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
-import { errors } from '../index.js'
+import { errors } from '../index.ts'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
 import { EventEmitter } from 'node:events'
 import { performance } from 'node:perf_hooks'
-import { createBundle, verifyBundle } from '../src/bundles.js'
-import { prepareDirectory } from '../src/directory.js'
-import { openDatabase } from '../src/native.js'
-import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.js'
-import { countItems, makeLiveDatabase, createTemporaryRoot } from './helpers.js'
+import { createBundle, verifyBundle } from '../src/bundles.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { openDatabase } from '../src/native.ts'
+import { operatorDatabasePath, withOperatorDatabase } from '../src/operator.ts'
+import { countItems, makeLiveDatabase, createTemporaryRoot } from './helpers.ts'
 
 function configured(config: unknown) {
   return {

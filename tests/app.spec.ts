@@ -12,15 +12,15 @@ import { RuntimeException } from '@adonisjs/core/exceptions'
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { defineConfig as defineDatabaseConfig } from '@adonisjs/lucid'
-import { internalHooks } from '../src/internal_hooks.js'
-import { prepareDirectory } from '../src/directory.js'
-import { createBundle } from '../src/bundles.js'
-import { defineConfig } from '../src/define_config.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
-import SqliteBackupProvider from '../providers/sqlite_backup_provider.js'
-import { verifyBundle } from '../src/bundles.js'
-import { openDatabase } from '../src/native.js'
-import { acquireLock } from '../src/lock.js'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { createBundle } from '../src/bundles.ts'
+import { defineConfig } from '../src/define_config.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
+import SqliteBackupProvider from '../providers/sqlite_backup_provider.ts'
+import { verifyBundle } from '../src/bundles.ts'
+import { openDatabase } from '../src/native.ts'
+import { acquireLock } from '../src/lock.ts'
 import {
   countItems,
   failDirectorySync,
@@ -28,7 +28,7 @@ import {
   stopChild,
   createTemporaryRoot,
   within,
-} from './helpers.js'
+} from './helpers.ts'
 
 interface BootAppOptions {
   withBackupConfig?: boolean | 'disabled'

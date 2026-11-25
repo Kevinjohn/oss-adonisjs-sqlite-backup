@@ -1,18 +1,18 @@
-import { errors } from '../index.js'
-import { prepared } from './helpers.js'
+import { errors } from '../index.ts'
+import { prepared } from './helpers.ts'
 /** Every publish step is fsynced in order: file, then its directory, before the next step. */
 import { test } from '@japa/runner'
 import fs, { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { dirname, join, relative } from 'node:path'
-import { createBundle, listBundleDirectoryNames, listBundles } from '../src/bundles.js'
-import { prepareDirectory } from '../src/directory.js'
-import { writeAll } from '../src/fs.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { pruneBundles } from '../src/prune.js'
-import { prepareRestore } from '../src/restore.js'
-import { MANIFEST } from '../src/names.js'
-import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
+import { createBundle, listBundleDirectoryNames, listBundles } from '../src/bundles.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { writeAll } from '../src/fs.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { MANIFEST } from '../src/names.ts'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.ts'
 
 test.group('durability', (group) => {
   let root: string

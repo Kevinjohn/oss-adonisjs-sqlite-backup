@@ -1,5 +1,3 @@
-import { BACKUP_ERROR_CODES, errors } from '../index.js'
-import { prepared } from './helpers.js'
 /**
  * Phase 7: `..` is resolved against the real folder on disk, as SQLite and the kernel do, never
  * collapsed as text before symlinks are followed.
@@ -18,31 +16,21 @@ import {
 } from 'node:fs'
 import { realpathSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { acquireLock } from '../src/lock.js'
-import { openDatabase } from '../src/native.js'
-import { pruneBundles } from '../src/prune.js'
-import { resolveFilesystemPath } from '../src/paths.js'
-import { prepareRestore } from '../src/restore.js'
-import { resolveSqliteSource } from '../src/source.js'
-import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
-
-const readBackupErrorCode = async (fn: () => unknown) => {
-  try {
-    await fn()
-  } catch (error) {
-    const code = (error as { code?: string }).code
-    const backupCode = BACKUP_ERROR_CODES.find((candidate) => candidate === code)
-    return backupCode && error instanceof errors[backupCode] ? backupCode : `raw:${code}`
-  }
-  return 'no error'
-}
-
-const lucid = (filename: string) => ({
-  connection: 'main',
-  connections: { main: { client: 'better-sqlite3', connection: { filename } } },
-})
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { acquireLock } from '../src/lock.ts'
+import { openDatabase } from '../src/native.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { resolveFilesystemPath } from '../src/paths.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { resolveSqliteSource } from '../src/source.ts'
+import {
+  makeLiveDatabase,
+  createTemporaryRoot,
+  prepared,
+  readBackupErrorCode,
+  sqliteConfig,
+} from './helpers.ts'
 
 /** A small database whose only row says who it belongs to. */
 function makeMarkedDatabase(path: string, marker: string) {
@@ -82,7 +70,7 @@ test.group('kernel-faithful paths', (group) => {
     const filename = join(root, 'alias') + '/../live2.db'
     // What SQLite itself opens with that filename:
     assert.equal(readDatabaseMarker(filename), 'what-the-app-uses')
-    const live = resolveSqliteSource(lucid(filename))
+    const live = resolveSqliteSource(sqliteConfig(filename))
     const bundle = await createBundle(prepared({ livePath: live, directory: join(root, 'b') }))
     assert.equal(readDatabaseMarker(join(bundle.path, 'db.sqlite')), 'what-the-app-uses')
     // The same when the raw filename is passed to createBundle directly.
@@ -104,7 +92,7 @@ test.group('kernel-faithful paths', (group) => {
     } finally {
       handle.close()
     }
-    const source = resolveSqliteSource(lucid(`${live} `))
+    const source = resolveSqliteSource(sqliteConfig(`${live} `))
     assert.equal(source, live)
     const bundle = await createBundle(prepared({ livePath: source, directory: join(root, 'b') }))
     assert.equal(readDatabaseMarker(join(bundle.path, 'db.sqlite')), 'driver-file')
@@ -140,7 +128,7 @@ test.group('kernel-faithful paths', (group) => {
     assert.equal(readDatabaseMarker(filename), 'what-the-app-uses')
     const bundle = await createBundle(
       prepared({
-        livePath: resolveSqliteSource(lucid(filename)),
+        livePath: resolveSqliteSource(sqliteConfig(filename)),
         directory: join(root, 'b'),
       })
     )

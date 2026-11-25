@@ -9,15 +9,15 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join } from 'node:path'
-import { createBundle, listBundles, verifyBundle } from '../src/bundles.js'
-import { prepareDirectory } from '../src/directory.js'
-import { defineConfig } from '../src/define_config.js'
-import { internalHooks } from '../src/internal_hooks.js'
-import { openDatabase } from '../src/native.js'
-import { pruneBundles } from '../src/prune.js'
-import { prepareRestore } from '../src/restore.js'
-import { SqliteBackup } from '../src/sqlite_backup.js'
-import { makeLiveDatabase, createTemporaryRoot } from './helpers.js'
+import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { defineConfig } from '../src/define_config.ts'
+import { internalHooks } from '../src/internal_hooks.ts'
+import { openDatabase } from '../src/native.ts'
+import { pruneBundles } from '../src/prune.ts'
+import { prepareRestore } from '../src/restore.ts'
+import { SqliteBackup } from '../src/sqlite_backup.ts'
+import { makeLiveDatabase, createTemporaryRoot } from './helpers.ts'
 
 const readBackupErrorCode = async (fn: () => unknown) => {
   try {

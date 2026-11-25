@@ -2,12 +2,12 @@ import { BaseCommand, flags } from '@adonisjs/core/ace'
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import type { CommandOptions } from '@adonisjs/core/types/ace'
 import { MigrationRunner } from '@adonisjs/lucid/migration'
-import { createBundle } from '../src/bundles.js'
-import { prepareDirectory } from '../src/directory.js'
-import { resolveFilesystemPath } from '../src/paths.js'
-import { assertSafeLayout, normalizeConfiguredSqliteFilename } from '../src/source.js'
-import type { BackupConfig } from '../src/types.js'
-import { preMigrationBackupDirectory } from '../src/upgrade.js'
+import { createBundle } from '../src/bundles.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { resolveFilesystemPath } from '../src/paths.ts'
+import { assertSafeLayout, normalizeConfiguredSqliteFilename } from '../src/source.ts'
+import type { BackupConfig } from '../src/types.ts'
+import { preMigrationBackupDirectory } from '../src/upgrade.ts'
 
 /**
  * `node ace db:upgrade`: a verified pre-migration backup bundle, then the pending migrations. A
@@ -26,8 +26,11 @@ export default class DbUpgrade extends BaseCommand {
   })
   declare schemaGenerate: boolean
 
-  private childReportedFailure = false
+  #childReportedFailure = false
 
+  /**
+   * @throws AggregateError propagated by pre-migration bundle creation.
+   */
   async run() {
     const db = await this.app.container.make('lucid.db')
     const connectionConfig = db.getRawConnection(db.primaryConnectionName)?.config
@@ -80,7 +83,7 @@ export default class DbUpgrade extends BaseCommand {
       if (generate.exitCode !== 0) {
         this.error = generate.error
         this.exitCode = generate.exitCode ?? 1
-        this.childReportedFailure = true
+        this.#childReportedFailure = true
       }
     }
   }
@@ -88,7 +91,7 @@ export default class DbUpgrade extends BaseCommand {
   /** Reports a failure kept in `error` as one line, so Ace does not render it with the stack. */
   async completed() {
     if (!this.error) return false
-    if (this.childReportedFailure) return true
+    if (this.#childReportedFailure) return true
     const detail =
       this.error instanceof InvalidArgumentsException
         ? `Error: ${this.error.message}`
