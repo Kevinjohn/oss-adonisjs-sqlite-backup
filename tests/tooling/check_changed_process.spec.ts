@@ -7,9 +7,9 @@ import { PassThrough } from 'node:stream'
 import os from 'node:os'
 import path from 'node:path'
 import { test } from '@japa/runner'
-import { collectExit, isAlive, readChildOutput, waitForFile } from '../helpers/child_process.js'
+import { collectExit, isAlive, readChildOutput, waitForFile } from '../helpers/child_process.ts'
 import { fileURLToPath } from 'node:url'
-import { startChild } from '../helpers.js'
+import { startChild } from '../helpers.ts'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const runnerPath = path.join(repoRoot, 'bin/check_changed.ts')
@@ -42,6 +42,10 @@ async function makeToolingFixture(options: FixtureOptions = {}): Promise<Fixture
   await writeFile(path.join(root, 'bin/check_changed.ts'), await readFile(runnerPath))
   await writeFile(path.join(root, 'bin/check_changed_plan.ts'), await readFile(plannerPath))
   await writeFile(path.join(root, 'package.json'), '{"type":"module"}\n')
+  await writeFile(
+    path.join(root, 'tsconfig.json'),
+    JSON.stringify({ compilerOptions: { rewriteRelativeImportExtensions: true } })
+  )
   await writeFile(path.join(root, 'README.md'), 'fixture baseline\n')
   await symlink(path.join(repoRoot, 'node_modules'), path.join(root, 'node_modules'), 'dir')
 
@@ -88,6 +92,7 @@ async function makeToolingFixture(options: FixtureOptions = {}): Promise<Fixture
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PATH: `${bin}${path.delimiter}${supportBin}`,
+    TS_EXEC_PWD: root,
   }
   delete env.CHECK_CHANGED_HANG
   if (options.command === 'hang') env.CHECK_CHANGED_HANG = '1'

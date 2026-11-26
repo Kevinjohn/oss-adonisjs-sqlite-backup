@@ -13,8 +13,8 @@ import {
   withClosedDatabase,
   withSampler,
   withWriter,
-} from '../../bin/measure_size_support.js'
-import { openDatabase } from '../../src/native.js'
+} from '../../bin/measure_size_support.ts'
+import { openDatabase } from '../../src/native.ts'
 
 function writer(mode: string): ChildProcess {
   return fork(new URL('../fixtures/measure_size_writer.ts', import.meta.url), [mode], {
