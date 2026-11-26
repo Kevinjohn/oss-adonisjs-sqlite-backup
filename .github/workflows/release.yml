@@ -7,19 +7,40 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  checks:
-    uses: ./.github/workflows/checks.yml
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Only main releases
+        run: test "$GITHUB_REF" = "refs/heads/main" || { echo "release runs on main only"; exit 1; }
+      - name: Verify checks for this commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow checks.yml --branch main --commit "$GITHUB_SHA" --limit 1 --json databaseId,headSha,event |
+            jq -er --arg sha "$GITHUB_SHA" '.[0] | select(.headSha == $sha and (.event == "push" or .event == "workflow_dispatch")) | .databaseId | numbers'); then
+            echo "Could not find checks.yml CI for main commit $GITHUB_SHA" >&2
+            exit 1
+          fi
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --interval 30 --exit-status
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs?filter=latest&per_page=100" |
+            jq -e --argjson required '["checks"]' '.jobs as $jobs | all($required[]; . as $name | any($jobs[]; .name == $name and .status == "completed" and .conclusion == "success"))' >/dev/null; then
+            echo "Could not verify every required check succeeded in CI run $run_id" >&2
+            exit 1
+          fi
   # Installing and building run dependency code, so they hold a read-only token.
   package:
-    needs: checks
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
       version: ${{ steps.check.outputs.version }}
       tarball: ${{ steps.check.outputs.tarball }}
     steps:
-      - name: Only main releases
-        run: test "$GITHUB_REF" = "refs/heads/main" || { echo "release runs on main only"; exit 1; }
       - uses: actions/checkout@v7
         with: { fetch-depth: 0, persist-credentials: false }
       - uses: pnpm/action-setup@v6

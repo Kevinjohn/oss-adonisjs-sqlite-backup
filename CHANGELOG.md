@@ -73,6 +73,10 @@ that includes the new API.
 - Update the backend backup configuration, provider, restore, installation reset and upgrade
   tests that use the removed imports.
 
+### Maintenance
+
+- Require successful main CI for the release commit before packaging the GitHub release archive.
+
 ## 0.5.0 - 2026-11-24
 
 - `db:upgrade` reports a failed migration as one `Upgrade failed: …` line, without a stack trace,

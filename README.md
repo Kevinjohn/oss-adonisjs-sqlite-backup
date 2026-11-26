@@ -348,3 +348,9 @@ Requires Node.js 24+, AdonisJS 7, Lucid 22 and better-sqlite3 13.
 ## User story catalogue
 
 See the [source-reviewed user story catalogue](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/blob/main/user-stories/README.md) for capability coverage and code-backed operation flows.
+
+## Releasing
+
+To release, merge the version and changelog update to `main`, then run the **release** workflow
+from `main` in GitHub Actions. It waits for the main **checks** run for that commit and requires
+all its check jobs to succeed before building and checking the release archive.
