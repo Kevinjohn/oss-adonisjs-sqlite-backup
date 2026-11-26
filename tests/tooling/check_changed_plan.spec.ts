@@ -7,7 +7,7 @@ import {
   planChangedChecks,
   type ChangedFile,
   type PlannedCheckStep,
-} from '../../bin/check_changed_plan.js'
+} from '../../bin/check_changed_plan.ts'
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url))
 

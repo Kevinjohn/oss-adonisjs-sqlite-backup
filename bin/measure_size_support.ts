@@ -1,6 +1,6 @@
 import type { ChildProcess } from 'node:child_process'
 import type { Worker } from 'node:worker_threads'
-import type { NativeDatabase } from '../src/native.js'
+import type { NativeDatabase } from '../src/native.ts'
 
 export type WriterStats = { max: number; writes: number; busy: number }
 

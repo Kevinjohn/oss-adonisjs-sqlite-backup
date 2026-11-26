@@ -14,11 +14,11 @@ import {
   withClosedDatabase,
   withSampler,
   withWriter,
-} from './measure_size_support.js'
-import { prepareDirectory } from '../src/directory.js'
-import { createBundle, verifyBundle } from '../src/bundles.js'
-import { openDatabase } from '../src/native.js'
-import { prepareRestore } from '../src/restore.js'
+} from './measure_size_support.ts'
+import { prepareDirectory } from '../src/directory.ts'
+import { createBundle, verifyBundle } from '../src/bundles.ts'
+import { openDatabase } from '../src/native.ts'
+import { prepareRestore } from '../src/restore.ts'
 
 const [role, livePath] = process.argv.slice(2)
 
