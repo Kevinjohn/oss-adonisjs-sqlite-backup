@@ -20,7 +20,7 @@ As a host operator, I want the `db:upgrade` Ace command to create a verified pre
 - A database with no row of type `table` in `sqlite_master`, or an in-memory database, is migrated without a pre-migration backup bundle. Views or SQLite header metadata alone do not meet the table condition.
 - Otherwise it writes a verified bundle to `pre-migration` under the configured backup `directory`, or to `<database>.backups` beside the database when no directory is configured, and reports `Pre-upgrade backup written <path>`. A distinct `pre-migration` child is outside the configured root’s immediate retention scan; a symlink resolving it to the root or later configuring the fallback as the root subjects those bundles to retention.
 - The bundle uses the primary connection's migrations table (`migrations.tableName`, default `adonis_schema`) and the backup config's `lockTimeoutMs` and `requireWal`, as `db:backup create` does. A non-WAL source is reported as a warning, or refused with `requireWal: true`.
-- If the bundle cannot be written, nothing is migrated and the command exits 1. Otherwise it runs the pending migrations with Lucid's migration runner, logging each migrated file or `Already up to date`. A migration failure is reported as one `Upgrade failed: …` line without a stack trace, exits 1, keeps the migration error in `error` and skips generation. After success outside production, schema generation runs by default on the primary connection. A nonzero or absent generator exit code becomes the command's exit code (default 1); `completed()` adds an `Upgrade failed` line only when the generator supplies an error. Otherwise the nonzero status and any generator-owned output remain.
+- If the bundle cannot be written, nothing is migrated and the command exits 1. Otherwise it runs the pending migrations with Lucid's migration runner, logging each migrated file or `Already up to date`. A migration failure is reported as one `Upgrade failed: …` line without a stack trace, exits 1, keeps the migration error in `error` and skips generation. After success outside production, schema generation runs by default on the primary connection. A nonzero or absent generator exit code becomes the command's exit code (default 1), and any generator error is retained. `completed()` adds no `Upgrade failed` line for the child failure; any child-owned output remains.
 
 ## User flow
 
@@ -48,7 +48,7 @@ Scope: `DbUpgrade.run` through migration and optional schema generation. The [cr
 flowchart TD
     A["DbUpgrade.run"] --> B["Make lucid.db; read primary connection config"]
     B --> C{"client is better-sqlite3?"}
-    C -->|No| X["Throw; catch logs Upgrade failed; exitCode 1"]
+    C -->|No| X["Throw; Ace retains failure and completed logs Upgrade failed"]
     C -->|Yes| D["Normalise configured filename; query sqlite_master for a table"]
     D --> E{"dbPath is not :memory: and a table exists?"}
     E -->|No| H["MigrationRunner up on the primary connection"]
@@ -67,9 +67,7 @@ flowchart TD
     K -->|Yes| M["Run schema:generate for primary connection"]
     M -->|Throws| X
     M -->|Nonzero or absent exit code| N["Copy optional generator error and exit code, default 1"]
-    N --> O{"Copied error present?"}
-    O -->|Yes| P["completed logs Upgrade failed"]
-    O -->|No| Q["Keep nonzero status without an additional Upgrade failed line"]
+    N --> O["Mark child failure reported; completed adds no duplicate error line"]
     M -->|Exit code 0| L
 ```
 

@@ -1,6 +1,6 @@
 # Decision gaps
 
-The package README documents the supported commands, operator limits, expected errors and prepare-only restore boundary. There is no separate accepted product-decision record in this repository that specifies an automated live-database replacement journey.
+The package README documents the supported commands, operator limits, expected errors and prepare-only restore boundary. The [standalone API decision](../DECISIONS.md#standalone-api) records the unreleased API alignment; it does not specify an automated live-database replacement journey.
 
 Restore preparation stops at a verified staged copy. Any live cutover remains host policy.
 

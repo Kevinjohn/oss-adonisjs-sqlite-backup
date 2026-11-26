@@ -15,7 +15,7 @@ As a host operator, I want to retain only the newest configured number of READY 
 | -------- | ----------- | ------------------------------------------------------------------------------- |
 | `--keep` | Number flag | Optional; defaults to configured `keep` (default 7); must be integer at least 1 |
 
-- Under the backup lock, prune keeps newest `keep` READY bundles and removes older READY bundles plus matching unfinished directories.
+- Under the backup lock, prune keeps newest `keep` READY bundles and attempts to remove every older READY bundle plus every matching unfinished directory found in the scan. `keep` is a retention count, not a deletion or batch limit; one run can remove more than `keep` entries.
 - READY controls retention membership only; prune does not verify each bundle's readability or recoverability. A damaged READY bundle still counts toward `keep`, so verify recovery points with `db:backup verify` and retain a separate known-good copy before pruning when recovery matters.
 - For a READY bundle it removes READY first, syncs the bundle directory, then removes the directory. With trusted archive parents and cooperating writers, interruption after unpublication leaves an unfinished bundle; a failed unlink or sync is reported as a per-item failure.
 - It touches only directories matching the bundle naming pattern. Per-bundle removals that fail are returned and warned; any failure makes command exit nonzero.
@@ -50,7 +50,7 @@ flowchart TD
     B1 --> C["pruneBundles"]
     C --> D["Validate keep, assertDirectory, acquireLock"]
     D --> E["listBundleDirectoryNames and split READY from unfinished"]
-    E --> F["Select older READY rows and all unfinished rows"]
+    E --> F["Select all older READY and all unfinished entries; no per-run deletion limit"]
     F --> G{"Entry has READY?"}
     G -->|Yes| G1["unlink READY and syncPath bundle"]
     G -->|No| G2["rmSync directory"]
