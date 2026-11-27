@@ -13,7 +13,7 @@ import { BackupArchive } from '../index.ts'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
 import { prepareDirectory } from '../src/directory.ts'
 import { defineConfig } from '../src/define_config.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { openDatabase } from '../src/native.ts'
 import { pruneBundles } from '../src/prune.ts'
 import { prepareRestore } from '../src/restore.ts'
@@ -39,7 +39,7 @@ test.group('host adoption contracts', (group) => {
     live = join(root, 'live.db')
     directory = join(root, 'backups')
     return () => {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       cleanup()
     }
   })
@@ -104,7 +104,7 @@ test.group('host adoption contracts', (group) => {
       assert.match(inTransaction.message, /open transaction/)
       assert.isTrue(database.inTransaction)
       database.exec('COMMIT')
-      internalHooks.step = (step) => {
+      InternalHooks.step = (step) => {
         if (step === 'create:copied') throw new Error('injected copy failure')
       }
       await assert.rejects(
@@ -113,7 +113,7 @@ test.group('host adoption contracts', (group) => {
       )
       database.exec("INSERT INTO items(body) VALUES ('still usable')")
       assert.deepEqual(database.prepare('SELECT count(*) AS n FROM items').get(), { n: 201 })
-      delete internalHooks.step
+      InternalHooks.step = undefined
       assert.equal(
         await readBackupErrorCode(() => createBundle({ livePath: live, directory })),
         'E_BACKUP_SOURCE'
@@ -270,7 +270,7 @@ test.group('host adoption contracts', (group) => {
       )
       assert.isFalse(existsSync(join(root, 'invalid.db')))
     }
-    internalHooks.step = (step, file) => {
+    InternalHooks.step = (step, file) => {
       if (step === 'create:copied') {
         const copy = openDatabase(file)
         try {
@@ -316,7 +316,7 @@ test.group('host adoption contracts', (group) => {
       ]
     )
     mkdirSync(join(directory, 'bak-utc-20300101-000001-000'))
-    internalHooks.step = (step, path) => {
+    InternalHooks.step = (step, path) => {
       if (step === 'list:ready' && path === first.path) rmSync(join(path, 'READY'))
     }
     assert.doesNotThrow(() => {
@@ -325,13 +325,13 @@ test.group('host adoption contracts', (group) => {
         [second.name]
       )
     })
-    internalHooks.step = (step, path) => {
+    InternalHooks.step = (step, path) => {
       if (step === 'list:ready') rmSync(join(path, 'manifest.json'))
     }
     assert.doesNotThrow(() => {
       assert.deepEqual(listBundles(directory), [])
     })
-    delete internalHooks.step
+    InternalHooks.step = undefined
     assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')
     writeFileSync(join(second.path, 'manifest.json'), '{')
     assert.equal(await readBackupErrorCode(() => listBundles(directory)), 'E_BACKUP_INVALID')

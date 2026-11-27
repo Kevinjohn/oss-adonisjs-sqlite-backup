@@ -8,7 +8,7 @@ import { dirname, join, relative } from 'node:path'
 import { createBundle, listBundleDirectoryNames, listBundles } from '../src/bundles.ts'
 import { prepareDirectory } from '../src/directory.ts'
 import { writeAll } from '../src/fs.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { pruneBundles } from '../src/prune.ts'
 import { prepareRestore } from '../src/restore.ts'
 import { MANIFEST } from '../src/names.ts'
@@ -21,11 +21,11 @@ test.group('durability', (group) => {
   group.each.setup(() => {
     ;({ root, cleanup } = createTemporaryRoot())
     events = []
-    internalHooks.durability = (event, path) => {
+    InternalHooks.durability = (event, path) => {
       events.push(`${event} ${relative(root, path).replace(/bak-utc-[\d-]+/, 'BUNDLE')}`)
     }
     return () => {
-      delete internalHooks.durability
+      InternalHooks.durability = undefined
       cleanup()
     }
   })
@@ -59,7 +59,7 @@ test.group('durability', (group) => {
     const offsets: number[] = []
     let manifestPath: string | undefined
 
-    internalHooks.step = (step, path) => {
+    InternalHooks.step = (step, path) => {
       if (step === 'create:checked') manifestPath = join(dirname(path), MANIFEST)
     }
     fs.writeSync = (
@@ -88,7 +88,7 @@ test.group('durability', (group) => {
       assert.deepEqual(offsets, [0, 5])
       assert.deepEqual(listBundleDirectoryNames(directory), [])
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       fs.writeSync = originalWrite
       syncBuiltinESMExports()
     }
@@ -107,7 +107,7 @@ test.group('durability', (group) => {
     const cleanupError = new Error('could not remove READY')
     const originalUnlink = fs.unlinkSync
 
-    internalHooks.durability = (event, path) => {
+    InternalHooks.durability = (event, path) => {
       if (event === 'sync' && fs.existsSync(join(path, 'READY'))) throw syncError
     }
     fs.unlinkSync = (path) => {
@@ -147,7 +147,7 @@ test.group('durability', (group) => {
   }) => {
     const directory = join(root, 'nested', 'backups')
     let secondStarted = false
-    internalHooks.durability = (event, path) => {
+    InternalHooks.durability = (event, path) => {
       events.push(`${event} ${relative(root, path)}`)
       if (event === 'sync' && path === root && !secondStarted) {
         secondStarted = true

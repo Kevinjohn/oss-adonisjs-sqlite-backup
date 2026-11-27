@@ -1,6 +1,6 @@
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { test } from '@japa/runner'
-import { errors, OperatorDatabase } from '../index.ts'
+import { errors, OperatorDatabase, type NativeDatabase } from '../index.ts'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { Database } from '@adonisjs/lucid/database'
@@ -756,5 +756,28 @@ test.group('OperatorDatabase.run', (group) => {
       () => new OperatorDatabase(db).run(async () => assert.fail('entered')),
       /transaction/
     )
+  })
+
+  test('types run callback connection and infers generic return value', async ({
+    assert,
+    expectTypeOf,
+  }) => {
+    const live = join(root, 'live.db')
+    makeLiveDatabase(live, { rows: 2 }).close()
+
+    const summary = await new OperatorDatabase(lucid(live)).run(async (connection) => {
+      expectTypeOf(connection).toEqualTypeOf<NativeDatabase>()
+      const row = connection.prepare('SELECT count(*) AS c FROM items').get() as { c: number }
+      return { count: row.c, inTransaction: connection.inTransaction }
+    })
+
+    expectTypeOf(summary).toEqualTypeOf<{ count: number; inTransaction: boolean }>()
+    assert.deepEqual(summary, { count: 2, inTransaction: false })
+
+    const voidRun = new OperatorDatabase(lucid(live)).run(async (connection) => {
+      expectTypeOf(connection).toEqualTypeOf<NativeDatabase>()
+    })
+    expectTypeOf(voidRun).toEqualTypeOf<Promise<void>>()
+    await voidRun
   })
 })

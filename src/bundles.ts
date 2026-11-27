@@ -17,7 +17,7 @@ import { readDatabaseIntegrityProblem } from './checks.ts'
 import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_SOURCE, E_BACKUP_UNSAFE } from './errors.ts'
 import { resolveFilesystemPath } from './paths.ts'
 import { hashFileSha256, syncPath, writeDurable } from './fs.ts'
-import { internalHooks } from './internal_hooks.ts'
+import { InternalHooks } from './internal_hooks.ts'
 import { acquireCreateLock } from './lock.ts'
 import {
   DATABASE,
@@ -47,7 +47,7 @@ export const MAX_FUTURE_MS = 24 * 60 * 60 * 1000
 export function listBundleDirectoryNames(directory: string): string[] {
   assertDirectory(directory)
   const names = readdirSync(directory)
-  internalHooks.step?.('list:read', directory)
+  InternalHooks.step?.('list:read', directory)
   return names
     .filter(
       (name) =>
@@ -66,7 +66,7 @@ export function listBundles(folder: string): BundleSummary[] {
     const bundle = { name, path: join(directory, name) }
     if (!existsSync(join(bundle.path, READY))) return []
     const hadManifest = existsSync(join(bundle.path, MANIFEST))
-    internalHooks.step?.('list:ready', bundle.path)
+    InternalHooks.step?.('list:ready', bundle.path)
     try {
       return [{ ...bundle, createdAt: readManifest(bundle).createdAt }]
     } catch (error) {
@@ -168,10 +168,10 @@ export function assertMatchesManifest(path: string, manifest: BundleManifest, la
 export function verifyBundle(folder: string, name?: string): BundleLocation {
   const directory = resolveFilesystemPath(folder)
   const bundle = requireSelectedBundle(directory, name)
-  internalHooks.step?.('verify:listed', bundle.path)
+  InternalHooks.step?.('verify:listed', bundle.path)
   // Default selection saw READY; a concurrent unpublish is reported as NOT_FOUND.
   const wasReady = name === undefined || existsSync(join(bundle.path, READY))
-  internalHooks.step?.('verify:selected', bundle.path)
+  InternalHooks.step?.('verify:selected', bundle.path)
   try {
     const manifest = readManifest(bundle)
     assertMatchesManifest(join(bundle.path, DATABASE), manifest, `bundle ${bundle.name}`)
@@ -220,7 +220,7 @@ export async function createBundle(
         unlinkSync(marker)
         syncPath(bundlePath)
       }
-      internalHooks.step?.('create:cleanup', bundlePath)
+      InternalHooks.step?.('create:cleanup', bundlePath)
       rmSync(bundlePath, { recursive: true, force: true })
     } catch (cleanupError) {
       if (error instanceof Error) {
@@ -267,7 +267,7 @@ export async function createBundle(
     }
     const stamp = Math.max(clock, newestStamp + 1)
     const name = requireFormattedBundleName(stamp)
-    internalHooks.step?.('create:naming', directory)
+    InternalHooks.step?.('create:naming', directory)
     try {
       mkdirSync(join(directory, name), { mode: 0o700 })
     } catch (cause) {
@@ -282,11 +282,11 @@ export async function createBundle(
     const file = join(bundlePath, DATABASE)
     const migrationsTable = input.migrationsTable ?? 'adonis_schema'
     const migrations = readMigrationRows(source, migrationsTable)
-    internalHooks.step?.('create:copying', file)
+    InternalHooks.step?.('create:copying', file)
     // One step: the default 100-page steps restart on every write by another connection and
     // never finish under sustained writes. One step copies under a single SQLite read snapshot.
     await source.backup(file, { progress: () => 0x7fffffff })
-    internalHooks.step?.('create:copied', file)
+    InternalHooks.step?.('create:copied', file)
     const copy = openDatabase(file, { fileMustExist: true })
     try {
       copy.pragma('wal_checkpoint(TRUNCATE)')
@@ -308,7 +308,7 @@ export async function createBundle(
     if (problem) throw new E_BACKUP_INVALID(`new backup failed: ${problem}`)
     chmodSync(file, 0o400)
     syncPath(file)
-    internalHooks.step?.('create:checked', file)
+    InternalHooks.step?.('create:checked', file)
     const manifest: BundleManifest = {
       format: 1,
       createdAt: new Date(clock).toISOString(),
@@ -330,7 +330,7 @@ export async function createBundle(
     }
     writeDurable(join(bundlePath, MANIFEST), JSON.stringify(manifest, null, 2))
     syncPath(bundlePath)
-    internalHooks.step?.('create:manifest', file)
+    InternalHooks.step?.('create:manifest', file)
     writeDurable(join(bundlePath, READY), '')
     syncPath(bundlePath)
     syncPath(directory)

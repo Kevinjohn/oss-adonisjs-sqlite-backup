@@ -21,7 +21,7 @@ import {
 import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
 import { defineConfig } from '../src/define_config.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { acquireLock } from '../src/lock.ts'
 import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.ts'
 import { hashFileSha256 } from '../src/fs.ts'
@@ -51,7 +51,7 @@ test.group('review findings', (group) => {
     live = join(root, 'live.db')
     directory = join(root, 'b')
     return () => {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       cleanup()
     }
   })
@@ -262,14 +262,14 @@ test.group('review findings', (group) => {
     makeLiveDatabase(live).close()
     const a = await createBundle(prepared({ livePath: live, directory }))
     const b = await createBundle(prepared({ livePath: live, directory }))
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'list:read') rmSync(a.path, { recursive: true, force: true })
     }
     assert.deepEqual(
       listBundles(directory).map((x) => x.name),
       [b.name]
     )
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'verify:selected') {
         chmodSync(join(b.path, 'db.sqlite'), 0o600)
         unlinkSync(join(b.path, 'READY'))
@@ -306,13 +306,13 @@ test.group('rules the review found untested', (group) => {
     directory = join(root, 'b')
     makeLiveDatabase(live).close()
     return () => {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       cleanup()
     }
   })
 
   test('M1: create checks the copy, not the live file', async ({ assert }) => {
-    internalHooks.step = (step, file) => {
+    InternalHooks.step = (step, file) => {
       if (step === 'create:copied') {
         // Break an index inside the copy only; the live file stays clean.
         overwrite(file, 4096 * 3, 'zzzzzzzzzzzz')

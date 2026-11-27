@@ -1,4 +1,7 @@
 import { Exception } from '@adonisjs/core/exceptions'
+import type { BackupErrorCode } from './types.ts'
+
+export type { BackupErrorCode }
 
 /** A backup lock is held by another operation. Retry later. */
 export class BackupLockedException extends Exception {
@@ -86,9 +89,6 @@ export const E_BACKUP_UNSAFE = BackupUnsafeException
 export const E_BACKUP_NOT_FOUND = BackupNotFoundException
 export const E_BACKUP_DISABLED = BackupDisabledException
 
-/** The stable code for each expected backup failure. */
-export type BackupErrorCode = (typeof BACKUP_ERROR_CODES)[number]
-
 export const BACKUP_ERROR_CODES = [
   E_BACKUP_LOCKED.code,
   E_BACKUP_SOURCE.code,
@@ -97,4 +97,4 @@ export const BACKUP_ERROR_CODES = [
   E_BACKUP_UNSAFE.code,
   E_BACKUP_NOT_FOUND.code,
   E_BACKUP_DISABLED.code,
-] as const
+] as const satisfies readonly BackupErrorCode[]

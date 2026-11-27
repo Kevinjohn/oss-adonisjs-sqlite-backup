@@ -10,7 +10,7 @@ import { statSync } from 'node:fs'
 import { Worker } from 'node:worker_threads'
 import { prepareDirectory } from '../../src/directory.ts'
 import { createBundle } from '../../src/bundles.ts'
-import { internalHooks } from '../../src/internal_hooks.ts'
+import { InternalHooks } from '../../src/internal_hooks.ts'
 import { acquireLock } from '../../src/lock.ts'
 import { openDatabase } from '../../src/native.ts'
 import { pruneBundles } from '../../src/prune.ts'
@@ -48,7 +48,7 @@ if (mode === 'lock') {
   process.send!(JSON.stringify(result))
   process.disconnect()
 } else if (mode === 'crash-create') {
-  internalHooks.step = (step, file) => {
+  InternalHooks.step = (step, file) => {
     if (at === 'mid-copy' && step === 'create:copying') {
       killWhenFileGrows(file, Math.floor(statSync(path).size / 4))
     } else if (step === at) die()
@@ -57,7 +57,7 @@ if (mode === 'lock') {
   await createBundle({ livePath: path, directory: arg! })
   process.send!('finished without crashing')
 } else if (mode === 'crash-prune') {
-  internalHooks.step = (step) => {
+  InternalHooks.step = (step) => {
     if (step === 'prune:unpublished') die()
   }
   process.send!('ready')

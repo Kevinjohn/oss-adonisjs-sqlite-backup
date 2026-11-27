@@ -17,7 +17,7 @@ import {
 import { realpathSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { acquireLock } from '../src/lock.ts'
 import { openDatabase } from '../src/native.ts'
 import { pruneBundles } from '../src/prune.ts'
@@ -55,7 +55,7 @@ test.group('kernel-faithful paths', (group) => {
   group.each.setup(() => {
     ;({ root, cleanup } = createTemporaryRoot())
     return () => {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       cleanup()
     }
   })
@@ -208,7 +208,7 @@ test.group('kernel-faithful paths', (group) => {
     await createBundle(prepared({ livePath: live, directory }))
     mkdirSync(join(root, 'stage'))
     mkdirSync(join(root, 'elsewhere'))
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'restore:checked') {
         renameSync(join(root, 'stage'), join(root, 'stage-old'))
         symlinkSync(join(root, 'elsewhere'), join(root, 'stage'))
@@ -229,7 +229,7 @@ test.group('kernel-faithful paths', (group) => {
     const directory = join(root, 'b')
     await createBundle(prepared({ livePath: live, directory }))
     const target = join(root, 's.db')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'restore:copied') {
         unlinkSync(target)
         writeFileSync(target, 'someone else')
@@ -450,7 +450,7 @@ test.group('kernel-faithful paths', (group) => {
     await createBundle(prepared({ livePath: live, directory }))
     mkdirSync(join(root, 'stage'))
     mkdirSync(join(root, 'elsewhere'))
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'restore:checked') {
         renameSync(join(root, 'stage'), join(root, 'stage-real'))
         symlinkSync(join(root, 'elsewhere'), join(root, 'stage'))
@@ -477,7 +477,7 @@ test.group('kernel-faithful paths', (group) => {
     await createBundle(prepared({ livePath: live, directory }))
     mkdirSync(join(root, 'stage'))
     mkdirSync(join(root, 'elsewhere'))
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'restore:copied') {
         renameSync(join(root, 'stage'), join(root, 'stage-real'))
         symlinkSync(join(root, 'elsewhere'), join(root, 'stage'))

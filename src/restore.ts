@@ -4,7 +4,7 @@ import { assertMatchesManifest, readManifest, requireSelectedBundle } from './bu
 import { assertDirectory } from './directory.ts'
 import { E_BACKUP_INVALID, E_BACKUP_NOT_FOUND, E_BACKUP_UNSAFE } from './errors.ts'
 import { syncPath } from './fs.ts'
-import { internalHooks } from './internal_hooks.ts'
+import { InternalHooks } from './internal_hooks.ts'
 import { DATABASE, READY } from './names.ts'
 import { resolveFilesystemPath } from './paths.ts'
 import { isWithin, normalizeConfiguredSqliteFilename } from './source.ts'
@@ -59,7 +59,7 @@ export function prepareRestore(input: {
   const bundle = requireSelectedBundle(directory, input.name)
   const manifest = readManifest(bundle)
   const source = join(bundle.path, DATABASE)
-  internalHooks.step?.('restore:checked', target)
+  InternalHooks.step?.('restore:checked', target)
   try {
     const sourceStat = lstatSync(source, { throwIfNoEntry: false })
     if (sourceStat && !sourceStat.isFile()) {
@@ -89,7 +89,7 @@ export function prepareRestore(input: {
   // moves it elsewhere, and may be swapped back before the checks below.
   const createdFileStat = lstatSync(target, { throwIfNoEntry: false })
   const resolvedTargetPath = resolveFilesystemPath(target)
-  internalHooks.step?.('restore:copied', target)
+  InternalHooks.step?.('restore:copied', target)
   const matchesCreatedRestoreFile = (path: string) => {
     const currentFileStat = lstatSync(path, { throwIfNoEntry: false })
     // Inode numbers are reused once a file is deleted, so a replacement file can share one;

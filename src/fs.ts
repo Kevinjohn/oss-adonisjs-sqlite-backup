@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { closeSync, fsyncSync, openSync, readSync, writeSync } from 'node:fs'
 import { E_BACKUP_WRITE } from './errors.ts'
-import { internalHooks } from './internal_hooks.ts'
+import { InternalHooks } from './internal_hooks.ts'
 
 /**
  * fsync a file or directory by path.
@@ -10,7 +10,7 @@ export function syncPath(path: string): void {
   const fd = openSync(path, 'r')
   try {
     fsyncSync(fd)
-    internalHooks.durability?.('sync', path)
+    InternalHooks.durability?.('sync', path)
   } finally {
     closeSync(fd)
   }
@@ -39,7 +39,7 @@ export function writeDurable(path: string, data: string): void {
   try {
     writeAll(fd, Buffer.from(data))
     fsyncSync(fd)
-    internalHooks.durability?.('write', path)
+    InternalHooks.durability?.('write', path)
   } finally {
     closeSync(fd)
   }

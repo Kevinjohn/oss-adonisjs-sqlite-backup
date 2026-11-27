@@ -1,4 +1,40 @@
-import type { NativeDatabase } from './native.ts'
+/** The native driver operations this package uses. */
+export interface NativeDatabase {
+  exec(sql: string): unknown
+  prepare(sql: string): {
+    get(...params: unknown[]): unknown
+    run(...params: unknown[]): unknown
+    all(...params: unknown[]): unknown[]
+    safeIntegers(enabled?: boolean): { all(...params: unknown[]): unknown[] }
+  }
+  pragma(sql: string, options?: { simple?: boolean }): unknown
+  backup(path: string, options?: { progress?: (info: unknown) => number }): Promise<unknown>
+  close(): void
+  readonly inTransaction: boolean
+}
+
+/** The stable code for each expected backup failure. */
+export type BackupErrorCode =
+  | 'E_BACKUP_LOCKED'
+  | 'E_BACKUP_SOURCE'
+  | 'E_BACKUP_INVALID'
+  | 'E_BACKUP_WRITE'
+  | 'E_BACKUP_UNSAFE'
+  | 'E_BACKUP_NOT_FOUND'
+  | 'E_BACKUP_DISABLED'
+
+export interface DirectoryLock {
+  /**
+   * Release the directory lock after the protected operation finishes.
+   *
+   * @example
+   * ```ts
+   * lock.release()
+   * ```
+   * @throws AggregateError when rollback throws a non-Error value and closing the handle also fails.
+   */
+  release(): void
+}
 
 /** Options accepted by `defineConfig` in `config/backup.ts`. */
 export interface BackupConfigInput {
@@ -84,7 +120,3 @@ export interface PruneProgress extends PruneResult {
   /** The final archive sync failed, so removal durability is unconfirmed. */
   archiveSyncFailed: boolean
 }
-
-export type { BackupErrorCode } from './errors.ts'
-export type { DirectoryLock } from './lock.ts'
-export type { NativeDatabase } from './native.ts'
