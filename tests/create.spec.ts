@@ -17,7 +17,7 @@ import { BackupArchive } from '../index.ts'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
 import { readDatabaseIntegrityProblem } from '../src/checks.ts'
 import { acquireLock } from '../src/lock.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { requireFormattedBundleName } from '../src/names.ts'
 import { openDatabase } from '../src/native.ts'
 import { SqliteBackup } from '../src/sqlite_backup.ts'
@@ -195,8 +195,8 @@ test.group('createBundle', (group) => {
     const copying = new Promise<void>((resolve) => {
       resolveCopying = resolve
     })
-    const prior = internalHooks.step
-    internalHooks.step = (step) => {
+    const prior = InternalHooks.step
+    InternalHooks.step = (step) => {
       if (step === 'create:copying') resolveCopying()
     }
     try {
@@ -207,7 +207,7 @@ test.group('createBundle', (group) => {
       assert.notEqual(one.name, two.name)
       assert.equal(listBundles(directory).length, 2)
     } finally {
-      internalHooks.step = prior
+      InternalHooks.step = prior
     }
   }).timeout(15_000)
 
@@ -235,12 +235,12 @@ test.group('createBundle', (group) => {
     const directory = join(root, 'b')
     mkdirSync(directory, { mode: 0o700 })
     let readyWritten = false
-    internalHooks.durability = (event, path) => {
+    InternalHooks.durability = (event, path) => {
       if (event === 'write' && path.endsWith('/READY')) readyWritten = true
       if (readyWritten && event === 'sync' && path === directory)
         throw new Error('post publication failure')
     }
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
     }
     try {
@@ -256,8 +256,8 @@ test.group('createBundle', (group) => {
       assert.lengthOf(bundles, 1)
       assert.isFalse(existsSync(join(directory, bundles[0], 'READY')))
     } finally {
-      delete internalHooks.durability
-      delete internalHooks.step
+      InternalHooks.durability = undefined
+      InternalHooks.step = undefined
     }
   })
 
@@ -278,7 +278,7 @@ test.group('createBundle', (group) => {
       }
       originalClose.call(this)
     }
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:copied') throw new Error('copy interrupted')
     }
     try {
@@ -292,7 +292,7 @@ test.group('createBundle', (group) => {
       )
       acquireLock(directory).release()
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       prototype.close = originalClose
       if (failedHandle) originalClose.call(failedHandle)
     }
@@ -313,7 +313,7 @@ test.group('createBundle', (group) => {
       }
       originalClose.call(this)
     }
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:copied') throw null
     }
     try {
@@ -327,7 +327,7 @@ test.group('createBundle', (group) => {
       ])
       assert.deepEqual(listBundles(directory), [])
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       prototype.close = originalClose
       if (source) originalClose.call(source)
     }
@@ -436,7 +436,7 @@ test.group('createBundle', (group) => {
         }
         originalClose.call(this)
       }
-      internalHooks.step = (step) => {
+      InternalHooks.step = (step) => {
         if (step === 'create:cleanup') throw new Error('recursive cleanup refused')
       }
       try {
@@ -451,7 +451,7 @@ test.group('createBundle', (group) => {
         assert.deepEqual(listBundles(directory), [])
         assert.throws(() => verifyBundle(directory), /no READY bundle/)
       } finally {
-        delete internalHooks.step
+        InternalHooks.step = undefined
         prototype.close = originalClose
         if (failedHandle) originalClose.call(failedHandle)
       }
@@ -464,7 +464,7 @@ test.group('createBundle', (group) => {
     const live = join(root, 'live.db')
     makeLiveDatabase(live).close()
     const directory = join(root, 'b')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:copied') throw null
       if (step === 'create:cleanup') throw 0
     }
@@ -477,7 +477,7 @@ test.group('createBundle', (group) => {
       assert.isTrue(Object.hasOwn(failure as object, 'cleanupError'))
       assert.equal((failure as { cleanupError: unknown }).cleanupError, 0)
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
   })
 

@@ -12,7 +12,7 @@ import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exce
 import { IgnitorFactory } from '@adonisjs/core/factories'
 import type { ApplicationService } from '@adonisjs/core/types'
 import { defineConfig as defineDatabaseConfig } from '@adonisjs/lucid'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { prepareDirectory } from '../src/directory.ts'
 import { createBundle } from '../src/bundles.ts'
 import { defineConfig } from '../src/define_config.ts'
@@ -576,7 +576,7 @@ test('command reports the original create failure and its cleanup failure', asyn
     db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
     db.close()
     const original = new Error('original copy failure')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:copied') throw original
       if (step === 'create:cleanup') throw new Error('cleanup permission failure')
     }
@@ -593,7 +593,7 @@ test('command reports the original create failure and its cleanup failure', asyn
     command.assertLogMatches(/original copy failure/)
     command.assertLogMatches(/backup temp cleanup failed: Error: cleanup permission failure/)
   } finally {
-    delete internalHooks.step
+    InternalHooks.step = undefined
     await app.terminate()
     cleanup()
   }
@@ -614,7 +614,7 @@ test('prune reports observed removals and earlier failures when archive sync fai
     const interrupted = 'bak-utc-20010101-000000-002'
     mkdirSync(join(directory, abandoned))
     mkdirSync(join(directory, interrupted))
-    internalHooks.step = (step, name) => {
+    InternalHooks.step = (step, name) => {
       if (step === 'prune:unpublished' && name === interrupted) throw new Error('remove failed')
     }
     const restoreSync = failDirectorySync(directory, new Error('final archive sync failed'))
@@ -634,7 +634,7 @@ test('prune reports observed removals and earlier failures when archive sync fai
       assert.isTrue(existsSync(join(directory, interrupted)))
     } finally {
       restoreSync()
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
   } finally {
     await app.terminate()
@@ -721,7 +721,7 @@ test('command reports rollback and close failures without hiding the create erro
     }
     originalClose.call(this)
   }
-  internalHooks.step = (step) => {
+  InternalHooks.step = (step) => {
     if (step === 'create:copied') throw new Error('original copy diagnostic')
   }
   try {
@@ -736,7 +736,7 @@ test('command reports rollback and close failures without hiding the create erro
     command.assertLogMatches(/backup native cleanup failed: Error: rollback diagnostic/)
     command.assertLogMatches(/backup native cleanup failed: Error: close diagnostic/)
   } finally {
-    delete internalHooks.step
+    InternalHooks.step = undefined
     prototype.exec = originalExec
     prototype.close = originalClose
     try {
@@ -765,7 +765,7 @@ test('command reports a falsy temporary cleanup failure', async () => {
     const db = openDatabase(live)
     db.exec('CREATE TABLE entries(id INTEGER PRIMARY KEY)')
     db.close()
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:copied') throw new Error('original copy failure')
       if (step === 'create:cleanup') throw 0
     }
@@ -776,7 +776,7 @@ test('command reports a falsy temporary cleanup failure', async () => {
     command.assertLogMatches(/original copy failure/)
     command.assertLogMatches(/backup temp cleanup failed: 0/)
   } finally {
-    delete internalHooks.step
+    InternalHooks.step = undefined
     try {
       await app.terminate()
     } finally {

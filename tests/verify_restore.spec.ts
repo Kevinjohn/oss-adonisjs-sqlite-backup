@@ -16,7 +16,7 @@ import {
 import { join } from 'node:path'
 import { createBundle, verifyBundle } from '../src/bundles.ts'
 import { acquireLock } from '../src/lock.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { openDatabase } from '../src/native.ts'
 import { prepareRestore } from '../src/restore.ts'
 import { countItems, makeLiveDatabase, overwrite, createTemporaryRoot } from './helpers.ts'
@@ -278,7 +278,7 @@ test.group('verify and prepareRestore', (group) => {
     mkdirSync(stage)
     const target = join(stage, 'staged.db')
     // Once the copy has landed, the staging folder stops accepting deletions.
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'restore:copied') chmodSync(stage, 0o500)
     }
     try {
@@ -294,7 +294,7 @@ test.group('verify and prepareRestore', (group) => {
       assert.equal(error?.code, 'E_BACKUP_INVALID')
       assert.equal(error?.cleanupError?.code, 'EACCES')
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       chmodSync(stage, 0o700)
     }
   })
@@ -319,7 +319,7 @@ test.group('verify and prepareRestore', (group) => {
 
   test('reports a bundle pruned after selection as not found', async ({ assert }) => {
     const target = join(root, 'pruned-stage.db')
-    internalHooks.step = (step, detail) => {
+    InternalHooks.step = (step, detail) => {
       if (step === 'restore:checked' && detail === target) rmSync(path, { recursive: true })
     }
     try {
@@ -335,7 +335,7 @@ test.group('verify and prepareRestore', (group) => {
       assert.equal(error?.cause?.code, 'ENOENT')
       assert.isFalse(existsSync(target))
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
   })
 })

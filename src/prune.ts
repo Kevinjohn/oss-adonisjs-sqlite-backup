@@ -5,7 +5,7 @@ import { listBundleDirectoryNames } from './bundles.ts'
 import { InvalidArgumentsException, RuntimeException } from '@adonisjs/core/exceptions'
 import { resolveFilesystemPath } from './paths.ts'
 import { syncPath } from './fs.ts'
-import { internalHooks } from './internal_hooks.ts'
+import { InternalHooks } from './internal_hooks.ts'
 import { acquireLock } from './lock.ts'
 import { READY } from './names.ts'
 import type { PruneProgress, PruneResult } from './types.ts'
@@ -61,7 +61,7 @@ export function pruneBundles(input: {
           unlinkSync(join(path, READY))
           syncPath(path)
         }
-        internalHooks.step?.('prune:unpublished', name)
+        InternalHooks.step?.('prune:unpublished', name)
         rmSync(path, { recursive: true, force: true })
         into.push(name)
       } catch (error) {

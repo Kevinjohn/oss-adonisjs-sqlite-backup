@@ -4,27 +4,36 @@ import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { setTimeout as delay } from 'node:timers/promises'
 import { E_BACKUP_LOCKED, E_BACKUP_UNSAFE } from './errors.ts'
-import { internalHooks } from './internal_hooks.ts'
+import { InternalHooks } from './internal_hooks.ts'
 import { resolveFilesystemPath } from './paths.ts'
 import { LOCK_FILE } from './names.ts'
-import { openDatabase, type NativeDatabase } from './native.ts'
+import { openDatabase } from './native.ts'
+import type { DirectoryLock, NativeDatabase } from './types.ts'
 
-export interface DirectoryLock {
-  /**
-   * Release the directory lock after the protected operation finishes.
-   *
-   * @example
-   * ```ts
-   * lock.release()
-   * ```
-   * @throws AggregateError when rollback throws a non-Error value and closing the handle also fails.
-   */
-  release(): void
-}
+export type { DirectoryLock }
 
 const DAMAGED = new Set(['SQLITE_NOTADB', 'SQLITE_CORRUPT'])
-const localLockHandlesByPath = new Map<string, WeakRef<NativeDatabase>>()
 export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647
+
+class LocalLockRegistry {
+  static #handlesByPath = new Map<string, WeakRef<NativeDatabase>>()
+
+  static isHeld(path: string): boolean {
+    return Boolean(this.#handlesByPath.get(path)?.deref()?.inTransaction)
+  }
+
+  static register(path: string, handle: NativeDatabase): WeakRef<NativeDatabase> {
+    const reference = new WeakRef(handle)
+    this.#handlesByPath.set(path, reference)
+    return reference
+  }
+
+  static unregister(path: string, reference: WeakRef<NativeDatabase>): void {
+    if (this.#handlesByPath.get(path) === reference) {
+      this.#handlesByPath.delete(path)
+    }
+  }
+}
 
 export function assertLockTimeout(timeoutMs: number): void {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 0 || timeoutMs > MAX_LOCK_TIMEOUT_MS) {
@@ -111,7 +120,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
   let handle: NativeDatabase
   try {
     // A holder on this event loop cannot make progress while SQLite waits synchronously.
-    const wait = localLockHandlesByPath.get(path)?.deref()?.inTransaction ? 0 : timeoutMs
+    const wait = LocalLockRegistry.isHeld(path) ? 0 : timeoutMs
     handle = acquireNativeLock(path, wait)
   } catch (error) {
     if (error instanceof Error && 'resourceCleanupErrors' in error) throw error
@@ -122,12 +131,11 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       })
     }
     if (!code || !DAMAGED.has(code)) throw error
-    internalHooks.step?.('lock:damaged', path)
+    InternalHooks.step?.('lock:damaged', path)
     truncateLockFile(path)
     return acquireLock(directory, timeoutMs)
   }
-  const reference = new WeakRef(handle)
-  localLockHandlesByPath.set(path, reference)
+  const reference = LocalLockRegistry.register(path, handle)
   let released = false
   return {
     release() {
@@ -145,7 +153,7 @@ export function acquireLock(directory: string, timeoutMs = 0): DirectoryLock {
       try {
         handle.close()
         released = true
-        if (localLockHandlesByPath.get(path) === reference) localLockHandlesByPath.delete(path)
+        LocalLockRegistry.unregister(path, reference)
       } catch (error) {
         closeError = error
         closeFailed = true

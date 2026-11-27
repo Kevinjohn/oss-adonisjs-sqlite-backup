@@ -15,7 +15,7 @@ import {
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { createBundle, listBundles, verifyBundle } from '../src/bundles.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { acquireLock } from '../src/lock.ts'
 import { openDatabase } from '../src/native.ts'
 import { prepareRestore } from '../src/restore.ts'
@@ -31,7 +31,7 @@ test.group('re-review', (group) => {
     live = join(root, 'live.db')
     directory = join(root, 'b')
     return () => {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       cleanup()
     }
   })
@@ -110,7 +110,7 @@ test.group('re-review', (group) => {
   }) => {
     makeLiveDatabase(live).close()
     mkdirSync(directory)
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'create:naming') chmodSync(directory, 0o500)
     }
     try {
@@ -157,7 +157,7 @@ test.group('re-review', (group) => {
     writeFileSync(lockPath, 'not a database, but long enough to be read as a header....')
     const victim = join(root, 'victim.txt')
     writeFileSync(victim, 'keep me')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'lock:damaged') {
         unlinkSync(lockPath)
         symlinkSync(victim, lockPath)
@@ -168,7 +168,7 @@ test.group('re-review', (group) => {
     // A FIFO swapped in is refused at once instead of blocking the open.
     unlinkSync(lockPath)
     writeFileSync(lockPath, 'not a database, but long enough to be read as a header....')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'lock:damaged') {
         unlinkSync(lockPath)
         execFileSync('mkfifo', [lockPath])
@@ -182,7 +182,7 @@ test.group('re-review', (group) => {
   }) => {
     makeLiveDatabase(live).close()
     const b = await createBundle(prepared({ livePath: live, directory }))
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'verify:listed') {
         chmodSync(join(b.path, 'READY'), 0o600)
         unlinkSync(join(b.path, 'READY'))

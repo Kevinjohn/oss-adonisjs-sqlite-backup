@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { InvalidArgumentsException } from '@adonisjs/core/exceptions'
 import { BACKUP_ERROR_CODES, errors } from '../index.ts'
 import { defineConfig } from '../index.ts'
-import type { BackupConfig } from '../src/types.ts'
+import type { BackupConfig, BackupErrorCode } from '../src/types.ts'
 import { requireFormattedBundleName, requireBundleTimestamp } from '../src/names.ts'
 import { resolveSqliteSource } from '../src/source.ts'
 
@@ -117,6 +117,10 @@ test.group('config and source resolution', () => {
       assert.equal(error.message, message)
       assert.strictEqual(error.cause, cause)
     }
+  })
+
+  test('BACKUP_ERROR_CODES lists exactly the BackupErrorCode union', ({ expectTypeOf }) => {
+    expectTypeOf<(typeof BACKUP_ERROR_CODES)[number]>().toEqualTypeOf<BackupErrorCode>()
   })
 
   test('bundle names round-trip', ({ assert }) => {

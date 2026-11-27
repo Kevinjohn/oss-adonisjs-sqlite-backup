@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { performance } from 'node:perf_hooks'
 import { createBundle, listBundles } from '../src/bundles.ts'
 import { defineConfig } from '../src/define_config.ts'
-import { internalHooks } from '../src/internal_hooks.ts'
+import { InternalHooks } from '../src/internal_hooks.ts'
 import { acquireLock } from '../src/lock.ts'
 import { pruneBundles } from '../src/prune.ts'
 import { SqliteBackup } from '../src/sqlite_backup.ts'
@@ -99,7 +99,7 @@ test.group('pruneBundles', (group) => {
     symlinkSync(directory, alias)
     let refused: unknown
     let elapsed = Infinity
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step !== 'create:copying') return
       const started = performance.now()
       try {
@@ -113,7 +113,7 @@ test.group('pruneBundles', (group) => {
     try {
       await createMany(1)
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
     assert.propertyVal(refused as object, 'code', 'E_BACKUP_LOCKED')
     assert.isBelow(elapsed, 1_000)
@@ -133,7 +133,7 @@ test.group('pruneBundles', (group) => {
       return originalExec.call(this, sql)
     }
     if (primary) {
-      internalHooks.step = (step) => {
+      InternalHooks.step = (step) => {
         if (step === 'list:read') throw primary.error
       }
     }
@@ -143,7 +143,7 @@ test.group('pruneBundles', (group) => {
     } catch (error) {
       failure = error
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
       prototype.exec = originalExec
     }
     acquireLock(directory).release()
@@ -173,13 +173,13 @@ test.group('pruneBundles', (group) => {
   test('reports a listing failure even when lock release succeeds', ({ assert }) => {
     mkdirSync(directory, { mode: 0o700 })
     const primary = new Error('directory listing failed')
-    internalHooks.step = (step) => {
+    InternalHooks.step = (step) => {
       if (step === 'list:read') throw primary
     }
     try {
       assert.throws(() => pruneBundles({ directory, keep: 1 }), /directory listing failed/)
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
     acquireLock(directory).release()
   })
@@ -220,7 +220,7 @@ test.group('pruneBundles', (group) => {
     const interrupted = 'bak-utc-20010101-000000-002'
     mkdirSync(join(directory, abandoned))
     mkdirSync(join(directory, interrupted))
-    internalHooks.step = (step, name) => {
+    InternalHooks.step = (step, name) => {
       if (step === 'prune:unpublished' && name === interrupted) throw new Error('remove failed')
     }
     const frozenRollbackError = Object.freeze(new Error('lock rollback failed'))
@@ -238,7 +238,7 @@ test.group('pruneBundles', (group) => {
       assert.isFalse(existsSync(join(directory, abandoned)))
       assert.isTrue(existsSync(join(directory, interrupted)))
     } finally {
-      delete internalHooks.step
+      InternalHooks.step = undefined
     }
   })
 
