@@ -20,7 +20,7 @@ As a host operator, I want to stage and verify a selected bundle at a new path s
 - The operation refuses a backup root, including a `--directory` override, that is writable by group or others (`E_BACKUP_UNSAFE`), the live database and its `-wal`, `-shm` or `-journal` sidecars, an existing target/sidecar (including dangling symlink), missing folder, or target inside backup root.
 - It copies exclusively to the target, sets mode `0600`, and rechecks size, SHA-256, integrity, foreign keys and migration journal against the bundle manifest. On failure in the post-copy validation and sync block it attempts to remove only its own staged file. If removal fails, the original exception carries `cleanupError` and the owned file can remain; inspect and remove that owned staged target before retrying, never an unrelated existing target or the live database.
 - A copy error is classified and rethrown without entering the post-copy cleanup block. Identity capture and path resolution after the copy also precede that block. Inspect the chosen target before retrying because a partial or unverified file may remain.
-- If the process is interrupted after creating the target but before return, a partial or unverified target may remain. Its presence does not prove verification completed; inspect and remove only the chosen target before retrying, because retry refuses an existing target.
+- If the process is interrupted after creating the target but before return, a partial or unverified target may remain. Its presence does not prove verification completed; inspect the target and establish that it is the file from this attempt before removing it; do not remove a replacement owned by another process. Retry refuses an existing target.
 - Success stops at a verified copy. It never replaces the live database or changes Lucid configuration. Stopping the app, switching paths, restarting and checking data remain operator decisions; retain the old file until satisfied.
 - Operation is lock-free; a concurrently pruned source may fail verification.
 
@@ -42,7 +42,7 @@ flowchart TD
     E --> F{"Copy verifies?"}
     F -->|No| G["Report failure; attempt owned staged-file cleanup"]
     G --> J{"Cleanup failed?"}
-    J -->|Yes| K["Inspect and remove only owned staged target before retry"]
+    J -->|Yes| K["Establish ownership before removing a staged file; then retry"]
     J -->|No| L["Resolve verification failure before retry"]
     F -->|Yes| H["Report staged path; live database is untouched"]
     H --> I["Operator may separately stop app, switch path and validate"]

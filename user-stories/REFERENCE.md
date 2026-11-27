@@ -1,11 +1,11 @@
 # Catalogue reference
 
-The unreleased API update reconciles the affected integration, setup, prune and stopped-server
-operator stories against the archive and operator classes in this tree.
+The standalone API described here is present in this source baseline and is not yet released. See
+[the adoption decision](../DECISIONS.md#standalone-api) for the replaced exports.
 
 ## Source baseline and scope
 
-Full catalogue baseline: [`11ec984f197962155c9405adabf02b5f87439680`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/11ec984f197962155c9405adabf02b5f87439680). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
+Full catalogue baseline: [`9718ed633495fea49b81b0d9f3719e7a1cebe8eb`](https://github.com/Kevinjohn/oss-adonisjs-sqlite-backup/commit/9718ed633495fea49b81b0d9f3719e7a1cebe8eb). Inventory covers Ace operations/options, config and provider, the container service, standalone exports, file/database effects, operational documentation and relevant tests.
 
 ## Roles and boundaries
 
