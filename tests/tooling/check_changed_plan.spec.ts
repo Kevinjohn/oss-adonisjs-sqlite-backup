@@ -45,7 +45,7 @@ test('package source and manifests run the suite and build', ({ assert }) => {
 test('files the specs read run the full suite without building the package', ({ assert }) => {
   for (const path of [
     'tests/helpers.ts',
-    'tests/fixtures/child.ts',
+    'tests/helpers/child.ts',
     'CHANGELOG.md',
     'user-stories/README.md',
     '.github/workflows/checks.yml',

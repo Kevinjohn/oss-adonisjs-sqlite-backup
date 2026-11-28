@@ -56,14 +56,14 @@ export function overwrite(path: string, offset: number, bytes: string) {
   }
 }
 
-/** Fork tests/fixtures/child.ts and wait for its ready message. */
+/** Fork tests/helpers/child.ts and wait for its ready message. */
 export function startChild(
   mode: 'lock' | 'writer' | 'create' | 'crash-create' | 'crash-prune',
   arg: string,
   ...extra: string[]
 ): Promise<ChildProcess> {
   return new Promise((resolve, reject) => {
-    const child = fork(new URL('./fixtures/child.ts', import.meta.url), [mode, arg, ...extra], {
+    const child = fork(new URL('./helpers/child.ts', import.meta.url), [mode, arg, ...extra], {
       execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
     })
     let ready = false
@@ -132,7 +132,7 @@ export function runChild(
   ...args: string[]
 ): Promise<{ signal: NodeJS.Signals | null; code: number | null; messages: string[] }> {
   return new Promise((resolve, reject) => {
-    const child = fork(new URL('./fixtures/child.ts', import.meta.url), [mode, ...args], {
+    const child = fork(new URL('./helpers/child.ts', import.meta.url), [mode, ...args], {
       execArgv: ['--import=@poppinss/ts-exec', '--no-warnings'],
     })
     const messages: string[] = []
